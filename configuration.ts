@@ -31,7 +31,7 @@ export const KEYSTORE = {
  */
 export const BLOCKCHAIN = {
   default: {
-    solVersion: "0.8.13",
+    solVersion: "0.8.17",
     evm: "london" as Hardfork,
     gasLimit: 800000,
     gasPrice: 0,
@@ -63,21 +63,17 @@ export const GAS_OPT = {
 };
 
 export const DEPLOY = {
-  deploymentsPath: "deployments.json",
-  proxyAdmin: {
-    name: "ProxyAdmin",
-    address: "", // "0xa978565B473049af66e883C471a725B3C1405f6b", // this address is used as default proxyAdmin for upgradeable deployments
-  },
+  deploymentsPath: "scr-deployments.json"
 };
 
-export const CONTRACT = [
-  {
+export const CONTRACT = {
+  lock: {
     name: "Lock",
   },
-  {
+  lockUpgradeable: {
     name: "LockUpgr",
   },
-];
+};
 
 export const TEST = {
   accountNumber: 10,
