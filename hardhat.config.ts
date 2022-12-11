@@ -633,9 +633,16 @@ const config: HardhatUserConfig = {
   typechain: {
     target: "ethers-v5",
     externalArtifacts: [
-      //! NOT WORKING: export extrange error
+      // OpenZeppelin
       "node_modules/@openzeppelin/contracts/build/contracts/ProxyAdmin.json",
       "node_modules/@openzeppelin/contracts/build/contracts/TransparentUpgradeableProxy.json",
+      // Standard Contract Registry
+      "node_modules/standard-contract-registry/artifacts/contracts/ContractRegistry.sol/ContractRegistry.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractRegistry.sol/IContractRegistry.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/ContractDeployer.sol/ContractDeployer.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractDeployer.sol/IContractDeployer.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/UpgradeableDeployer.sol/UpgradeableDeployer.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/interfaces/IUpgradeableDeployer.sol/IUpgradeableDeployer.json",
     ],
   },
 };
