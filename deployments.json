@@ -1,0 +1,29 @@
+[
+  {
+    "network": { "name": "ganache", "chainId": 1337 },
+    "smartContracts": {
+      "proxyAdmins": [
+        {
+          "address": "0xe78A0F7E598Cc8b0Bb87894B0F60dD2a88d6a8Ab",
+          "contractName": "ProxyAdmin",
+          "deployTimestamp": "2022-11-27T14:34:08.000Z",
+          "deployTxHash": "0xa54180834b716dba37a307a2a7538cabe3f8eb6b3764d7c4b1bba57a12efb8da",
+          "byteCodeHash": "0xe3d3f5223788f4f9b795dfaa328102945ea67dcd9bb70e0f895ee93be0c1376a"
+        }
+      ],
+      "contracts": [
+        {
+          "admin": "0xe78A0F7E598Cc8b0Bb87894B0F60dD2a88d6a8Ab",
+          "proxy": "0xCfEB869F69431e42cdB54A4F4f105C19C080A601",
+          "logic": "0x254dffcd3277C0b1660F6d42EFbB754edaBAbC2B",
+          "contractName": "LockUpgr",
+          "deployTimestamp": "2022-11-27T14:34:08.000Z",
+          "proxyTxHash": "0xc825601a9e5978a95fe304d8d5ce1398f9da1cb16583791dc34620420bda2255",
+          "logicTxHash": "0x329d37bf940f62ef8945fafa9d466a5a844506902cb94634cd73d740207fd6f9",
+          "byteCodeHash": "0xfe1608f3b4791c521a71b28db8c7655b10f76033c0242ff886047e09ec4883d5",
+          "upgradeTimestamp": "2022-11-27T14:34:40.000Z"
+        }
+      ]
+    }
+  }
+]
