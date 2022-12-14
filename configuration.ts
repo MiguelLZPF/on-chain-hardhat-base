@@ -63,10 +63,28 @@ export const GAS_OPT = {
 };
 
 export const DEPLOY = {
-  deploymentsPath: "scr-deployments.json"
+  deploymentsPath: "scr-deployments.json",
 };
 
 export const CONTRACT = {
+  // system contracts
+  codeTrust: {
+    name: "CodeTrust",
+    address: "", // if set can be used as default value for some methods
+  },
+  contractRegistry: {
+    name: "ContractRegistry",
+    address: "", // if set can be used as default value for some methods
+  },
+  contractDeployer: {
+    name: "ContractDeployer",
+    address: "", // if set can be used as default value for some methods
+  },
+  upgradeableDeployer: {
+    name: "UpgradeableDeployer",
+    address: "", // if set can be used as default value for some methods
+  },
+  // development contracts
   lock: {
     name: "Lock",
   },
