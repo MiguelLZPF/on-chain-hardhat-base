@@ -63,7 +63,7 @@ export const GAS_OPT = {
 };
 
 export const DEPLOY = {
-  deploymentsPath: "scr-deployments.json",
+  deploymentsPath: "registry-deployment.json",
 };
 
 export const CONTRACT = {
