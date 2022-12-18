@@ -1,8 +1,9 @@
-import { CONTRACT, GAS_OPT } from "configuration";
+import { CONTRACT, DEPLOY, GAS_OPT } from "configuration";
 import { ghre } from "scripts/utils";
+import * as fs from "async-file";
 import { Signer } from "ethers";
 import { isAddress, keccak256, formatBytes32String, BytesLike } from "ethers/lib/utils";
-import { TransactionReceipt } from "@ethersproject/providers";
+import { TransactionReceipt, JsonRpcProvider } from "@ethersproject/providers";
 import yesno from "yesno";
 import { IRegularDeployment } from "models/Deploy";
 // Artifacts
@@ -19,7 +20,7 @@ import {
 const ethers = ghre.ethers;
 const NAME_HEXSTRING_ZERO = formatBytes32String("");
 // Deploy contract code
-const CODETRUST_DEP_CODE = CODE_TRUST_ARTIFACT.deployedBytecode;
+const CODE_TRUST_DEP_CODE = CODE_TRUST_ARTIFACT.deployedBytecode;
 const REGISTRY_DEP_CODE = CONTRACT_REGISTRY_ARTIFACT.deployedBytecode;
 const DEPLOYER_DEP_CODE = CONTRACT_DEPLOYER_ARTIFACT.deployedBytecode;
 
@@ -120,11 +121,75 @@ const initialize = async (
   const deployerBlock = deployerReceipt
     ? ethers.provider.getBlock(deployerReceipt.blockHash)
     : undefined;
-
+  // Get deployed code for each contract
+  const codeTrustDepCode = ethers.provider.getCode((await codeTrust).address);
+  const registryDepCode = ethers.provider.getCode(contractRegistry.address);
+  const deployerDepCode = contractDeployer
+    ? ethers.provider.getCode(contractDeployer.address)
+    : undefined;
+  // Get hash of the deployed code
+  const codeTrustDepCodeHash = keccak256(await codeTrustDepCode);
+  const registryDepCodeHash = keccak256(await registryDepCode);
+  const deployerDepCodeHash = deployerDepCode ? keccak256(await deployerDepCode) : undefined;
+  // Check that is the same code
+  if (codeTrustDepCodeHash != CODE_TRUST_DEP_CODE) {
+    console.warn(`WARNING: deployed code hash mismatch ${CONTRACT.codeTrust.name}`);
+  }
+  if (registryDepCodeHash != REGISTRY_DEP_CODE) {
+    console.warn(`WARNING: deployed code hash mismatch ${CONTRACT.contractRegistry.name}`);
+  }
+  if (deployerDepCodeHash && deployerDepCodeHash != DEPLOYER_DEP_CODE) {
+    console.warn(`WARNING: deployed code hash mismatch ${CONTRACT.contractDeployer.name}`);
+  }
+  // Register the contracts
+  const registryRecord = getRecord(
+    CONTRACT.contractRegistry.name,
+    await systemSigner.getAddress(),
+    undefined,
+    contractRegistry
+  );
+  const codeTrustRecord = register(
+    CONTRACT.codeTrust.name,
+    (await codeTrust).address,
+    (await codeTrust).address,
+    "01.00",
+    codeTrustDepCodeHash,
+    systemSigner,
+    contractRegistry
+  );
+  const deployerRecord = contractDeployer
+    ? register(
+        CONTRACT.contractDeployer.name,
+        contractDeployer.address,
+        contractDeployer.address,
+        "01.00",
+        deployerDepCodeHash!,
+        systemSigner,
+        contractRegistry
+      )
+    : undefined;
+  // Check deployments and registrations
+  if (!(await codeTrustRecord) || !(await codeTrustRecord).name) {
+    throw new Error(`ERROR: bad ${CONTRACT.codeTrust.name} record`);
+  }
+  if (!(await registryRecord) || !(await registryRecord).name) {
+    throw new Error(`ERROR: bad ${CONTRACT.contractRegistry.name} record`);
+  }
+  if (contractDeployer && (!(await deployerRecord) || !(await deployerRecord)!.name)) {
+    throw new Error(`ERROR: bad ${CONTRACT.contractDeployer.name} record`);
+  }
   // Save ContractRegistry deploy information
+  await fs.writeFile(
+    DEPLOY.deploymentsPath,
+    JSON.stringify({
+      codeTrust: codeTrustRecord,
+      contractRegistry: registryRecord,
+      contractDeployer: deployerRecord,
+    })
+  );
 };
 
-const registerByName = async (contractName: TODO) => {};
+const registerByName = async (contractName: any /*TODO*/) => {};
 
 const register = async (
   recordName: string,
@@ -136,10 +201,7 @@ const register = async (
   contractRegistry?: string | IContractRegistry
 ) => {
   const adminAddr = admin.getAddress();
-  contractRegistry = (await createRegistryInstance(
-    contractRegistry,
-    ethers.provider
-  )) as IContractRegistry; // TODO: remove "as"...
+  contractRegistry = await createRegistryInstance(contractRegistry, ethers.provider);
   const nameBytes = formatBytes32String(recordName);
   const versionNumber = await versionDotToNum(version);
 
@@ -154,8 +216,9 @@ const register = async (
       GAS_OPT.max
     )
   ).wait();
-  // TODO: throw exception
-
+  if (!receipt || !receipt.transactionHash) {
+    throw new Error("ERROR: Transaction not executed, no valid receipt found");
+  }
   return await getRecord(recordName, await adminAddr, version, contractRegistry);
 };
 
@@ -165,10 +228,7 @@ const getRecord = async (
   version?: string,
   contractRegistry?: string | IContractRegistry
 ) => {
-  contractRegistry = (await createRegistryInstance(
-    contractRegistry,
-    ethers.provider
-  )) as IContractRegistry; // TODO: remove "as"...
+  contractRegistry = await createRegistryInstance(contractRegistry, ethers.provider);
   const nameBytes = formatBytes32String(recordName);
   const versionNumber = version ? await versionDotToNum(version) : undefined;
 
@@ -179,6 +239,39 @@ const getRecord = async (
     );
   }
   return result.record;
+};
+
+// UTILITY FUNCTIONS
+
+const createRegistryInstance = async (
+  registry?: IContractRegistry | string,
+  signerOrProvider?: Signer | JsonRpcProvider
+) => {
+  if (registry && typeof registry == "string") {
+    // we have the registry address
+    registry = (
+      await ethers.getContractAtFromArtifact(CONTRACT_REGISTRY_ARTIFACT, registry)
+    ).connect(signerOrProvider || ethers.provider) as IContractRegistry;
+  } else if (registry) {
+    // we have the registry instance
+    registry = (registry as IContractRegistry).connect(signerOrProvider || ethers.provider);
+  } else {
+    // no registry, use the deployment file
+    if (!(await fs.exists(DEPLOY.deploymentsPath))) {
+      throw new Error(
+        `No ContractRegistry deployment file found. An initialization step is needed.`
+      );
+    }
+    const registryDeployment = JSON.parse(await fs.readFile(DEPLOY.deploymentsPath));
+
+    registry = (
+      await ethers.getContractAtFromArtifact(
+        CONTRACT_REGISTRY_ARTIFACT,
+        registryDeployment.contractRegistry.proxy
+      )
+    ).connect(signerOrProvider || ethers.provider) as IContractRegistry;
+  }
+  return registry;
 };
 
 export const versionNumToDot = async (versionNum: number) => {
