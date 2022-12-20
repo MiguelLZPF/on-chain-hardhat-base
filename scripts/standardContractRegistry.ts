@@ -20,9 +20,9 @@ import {
 
 const NAME_HEXSTRING_ZERO = formatBytes32String("");
 // Deploy contract code
-const CODE_TRUST_DEP_CODE = CODE_TRUST_ARTIFACT.deployedBytecode;
-const REGISTRY_DEP_CODE = CONTRACT_REGISTRY_ARTIFACT.deployedBytecode;
-const DEPLOYER_DEP_CODE = CONTRACT_DEPLOYER_ARTIFACT.deployedBytecode;
+const CODE_TRUST_DEP_CODE_HASH = keccak256(CODE_TRUST_ARTIFACT.deployedBytecode);
+const REGISTRY_DEP_CODE_HASH = keccak256(CONTRACT_REGISTRY_ARTIFACT.deployedBytecode);
+const DEPLOYER_DEP_CODE_HASH = keccak256(CONTRACT_DEPLOYER_ARTIFACT.deployedBytecode);
 
 export const deployCodeTrust = async (deployer: Signer) => {
   const provider = deployer.provider || ghre.ethers.provider;
@@ -102,7 +102,7 @@ export const initialize = async (
         codeTrustAddr,
         NAME_HEXSTRING_ZERO,
         await versionDotToNum("01.00"),
-        keccak256(REGISTRY_DEP_CODE),
+        keccak256(REGISTRY_DEP_CODE_HASH),
         GAS_OPT.max
       )
     ).deployed();
@@ -121,15 +121,15 @@ export const initialize = async (
       await contractDeployerFactory.deploy(contractRegistry.address, GAS_OPT.max)
     ).deployed();
   }
-  codeTrustReceipt = await codeTrust.deployTransaction.wait();
+  // codeTrustReceipt = await codeTrust.deployTransaction.wait();
   registryReceipt = await contractRegistry.deployTransaction.wait();
   deployerReceipt = contractDeployer ? await contractDeployer.deployTransaction.wait() : undefined;
   // Get all blocks
-  const codeTrustBlock = provider.getBlock(codeTrustReceipt.blockHash);
-  const registryBlock = provider.getBlock(registryReceipt.blockHash);
-  const deployerBlock = deployerReceipt ? provider.getBlock(deployerReceipt.blockHash) : undefined;
+  // const codeTrustBlock = provider.getBlock(codeTrustReceipt.blockHash);
+  // const registryBlock = provider.getBlock(registryReceipt.blockHash);
+  // const deployerBlock = deployerReceipt ? provider.getBlock(deployerReceipt.blockHash) : undefined;
   // Get deployed code for each contract
-  const codeTrustDepCode = provider.getCode((await codeTrust).address);
+  const codeTrustDepCode = provider.getCode(codeTrust.address);
   const registryDepCode = provider.getCode(contractRegistry.address);
   const deployerDepCode = contractDeployer ? provider.getCode(contractDeployer.address) : undefined;
   // Get hash of the deployed code
@@ -137,13 +137,16 @@ export const initialize = async (
   const registryDepCodeHash = keccak256(await registryDepCode);
   const deployerDepCodeHash = deployerDepCode ? keccak256(await deployerDepCode) : undefined;
   // Check that is the same code
-  if (codeTrustDepCodeHash != CODE_TRUST_DEP_CODE) {
+  // console.log(codeTrustDepCodeHash, CODE_TRUST_DEP_CODE_HASH);
+  // console.log(registryDepCodeHash, REGISTRY_DEP_CODE_HASH);
+  // console.log(deployerDepCodeHash, DEPLOYER_DEP_CODE_HASH);
+  if (codeTrustDepCodeHash != CODE_TRUST_DEP_CODE_HASH) {
     console.warn(`WARNING: deployed code hash mismatch ${CONTRACT.codeTrust.name}`);
   }
-  if (registryDepCodeHash != REGISTRY_DEP_CODE) {
+  if (registryDepCodeHash != REGISTRY_DEP_CODE_HASH) {
     console.warn(`WARNING: deployed code hash mismatch ${CONTRACT.contractRegistry.name}`);
   }
-  if (deployerDepCodeHash && deployerDepCodeHash != DEPLOYER_DEP_CODE) {
+  if (deployerDepCodeHash && deployerDepCodeHash != DEPLOYER_DEP_CODE_HASH) {
     console.warn(`WARNING: deployed code hash mismatch ${CONTRACT.contractDeployer.name}`);
   }
   // Register the contracts
@@ -162,6 +165,7 @@ export const initialize = async (
     systemSigner,
     contractRegistry
   );
+  console.log(await codeTrustRecord, await registryRecord);
   const deployerRecord = contractDeployer
     ? register(
         CONTRACT.contractDeployer.name,
@@ -173,7 +177,7 @@ export const initialize = async (
         contractRegistry
       )
     : undefined;
-  // Check deployments and registrations
+    // Check deployments and registrations
   if (!(await codeTrustRecord) || !(await codeTrustRecord).name) {
     throw new Error(`ERROR: bad ${CONTRACT.codeTrust.name} record`);
   }
@@ -183,11 +187,12 @@ export const initialize = async (
   if (contractDeployer && (!(await deployerRecord) || !(await deployerRecord)!.name)) {
     throw new Error(`ERROR: bad ${CONTRACT.contractDeployer.name} record`);
   }
+  
   // Save ContractRegistry deploy information
   const objectToSave = {
-    codeTrust: codeTrustRecord,
-    contractRegistry: registryRecord,
-    contractDeployer: deployerRecord,
+    codeTrust: await codeTrustRecord,
+    contractRegistry: await registryRecord,
+    contractDeployer: await deployerRecord,
   };
   await fs.writeFile(DEPLOY.deploymentsPath, JSON.stringify(objectToSave));
   return objectToSave;
@@ -206,7 +211,7 @@ const register = async (
 ) => {
   const provider = admin.provider || ghre.ethers.provider;
   const adminAddr = admin.getAddress();
-  contractRegistry = await createRegistryInstance(contractRegistry, provider);
+  contractRegistry = await createRegistryInstance(contractRegistry, admin);
   const nameBytes = formatBytes32String(recordName);
   const versionNumber = await versionDotToNum(version);
 

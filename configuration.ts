@@ -33,7 +33,7 @@ export const BLOCKCHAIN = {
   default: {
     solVersion: "0.8.17",
     evm: "london" as Hardfork,
-    gasLimit: 800000,
+    gasLimit: 10000000,
     gasPrice: 0,
     maxFeePerGas: 900000000,
     maxPriorityFeePerGas: 100,

@@ -26,6 +26,14 @@ export interface IGetMnemonic {
   password: string;
 }
 
+export interface IDeployCodeTrust {
+  relativePath?: string;
+  password: string;
+  mnemonicPhrase?: string;
+  mnemonicPath: string;
+  mnemonicLocale: string;
+}
+
 export interface IInitialize {
   deployContractDeployer?: boolean;
   codeTrust: string;
