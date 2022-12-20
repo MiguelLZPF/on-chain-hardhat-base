@@ -1,15 +1,19 @@
-import "@nomicfoundation/hardhat-toolbox";
-import "hardhat-contract-sizer";
+import '@nomicfoundation/hardhat-toolbox'
+import 'hardhat-contract-sizer'
 // import { ethers } from "hardhat"; //! Cannot be imported here or any file that is imported here because it is generated here
-import { task, types } from "hardhat/config";
-import { HardhatRuntimeEnvironment, HardhatUserConfig } from "hardhat/types";
-import { BigNumber, Contract, Wallet } from "ethers";
-import { Mnemonic } from "ethers/lib/utils";
-import { BLOCKCHAIN, CONTRACT, DEPLOY, KEYSTORE } from "./configuration";
-import * as fs from "async-file";
-import { decryptWallet, generateWallet, generateWalletBatch } from "./scripts/wallets";
-import { changeLogic, deploy, getLogic } from "./scripts/deploy";
-import { setGlobalHRE } from "./scripts/utils";
+import { task, types } from 'hardhat/config'
+import { HardhatRuntimeEnvironment, HardhatUserConfig } from 'hardhat/types'
+import { BigNumber, Contract, Wallet } from 'ethers'
+import { Mnemonic } from 'ethers/lib/utils'
+import { BLOCKCHAIN, CONTRACT, DEPLOY, KEYSTORE } from './configuration'
+import * as fs from 'async-file'
+import {
+  decryptWallet,
+  generateWallet,
+  generateWalletBatch,
+} from './scripts/wallets'
+import { changeLogic, deploy, getLogic } from './scripts/deploy'
+import { setGlobalHRE } from './scripts/utils'
 import {
   ICallContract,
   IChangeLogic,
@@ -18,177 +22,307 @@ import {
   IGetLogic,
   IGetMnemonic,
   IGetWalletInfo,
+  IInitialize,
   IUpgrade,
-} from "./models/Tasks";
+} from './models/Tasks'
+import { initialize } from 'scripts/standardContractRegistry'
 
 //* TASKS
-// task("generate-wallets", "Generates Encryped JSON persistent wallets")
-//   .addPositionalParam("type", "Type of generation [single, batch]", "single", types.string)
-//   .addOptionalParam(
-//     "relativePath",
-//     "Path relative to KEYSTORE.root to store the wallets",
-//     undefined,
-//     types.string
-//   )
-//   .addOptionalParam("password", "Wallet password", undefined, types.string)
-//   .addOptionalParam("entropy", "Wallet entropy for random generation", undefined, types.string)
-//   .addOptionalParam(
-//     "privateKey",
-//     "Private key to generate wallet from. Hexadecimal String format expected",
-//     undefined,
-//     types.string
-//   )
-//   .addOptionalParam(
-//     "mnemonicPhrase",
-//     "Mnemonic phrase to generate wallet from",
-//     undefined,
-//     types.string
-//   )
-//   .addOptionalParam(
-//     "mnemonicPath",
-//     "Mnemonic path to generate wallet from",
-//     undefined,
-//     types.string
-//   )
-//   .addOptionalParam(
-//     "mnemonicLocale",
-//     "Mnemonic locale to generate wallet from",
-//     KEYSTORE.default.mnemonic.locale,
-//     types.string
-//   )
-//   .addOptionalParam(
-//     "batchSize",
-//     "Number of user wallets to be generated in batch",
-//     undefined,
-//     types.int
-//   )
-//   .addFlag("connect", "If true, the wallet(s) will be automatically connected to the provider")
-//   .setAction(async (args: IGenerateWallets, hre) => {
-//     // if default keyword, use the default phrase
-//     args.mnemonicPhrase =
-//       args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
-//     if (args.type.toLowerCase() == "batch") {
-//       await generateWalletBatch(
-//         args.relativePath,
-//         args.password,
-//         args.batchSize,
-//         args.entropy ? Buffer.from(args.entropy) : undefined,
-//         {
-//           phrase: args.mnemonicPhrase,
-//           path: args.mnemonicPath || KEYSTORE.default.mnemonic.basePath,
-//           locale: args.mnemonicLocale,
-//         } as Mnemonic,
-//         args.connect
-//       );
-//     } else {
-//       await generateWallet(
-//         args.relativePath,
-//         args.password,
-//         args.entropy ? Buffer.from(args.entropy) : undefined,
-//         args.privateKey,
-//         {
-//           phrase: args.mnemonicPhrase,
-//           path: args.mnemonicPath || KEYSTORE.default.mnemonic.path,
-//           locale: args.mnemonicLocale,
-//         } as Mnemonic,
-//         args.connect
-//       );
-//     }
-//   });
+task('generate-wallets', 'Generates Encryped JSON persistent wallets')
+  .addPositionalParam(
+    'type',
+    'Type of generation [single, batch]',
+    'single',
+    types.string,
+  )
+  .addOptionalParam(
+    'relativePath',
+    'Path relative to KEYSTORE.root to store the wallets',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam('password', 'Wallet password', undefined, types.string)
+  .addOptionalParam(
+    'entropy',
+    'Wallet entropy for random generation',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'privateKey',
+    'Private key to generate wallet from. Hexadecimal String format expected',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'mnemonicPhrase',
+    'Mnemonic phrase to generate wallet from',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'mnemonicPath',
+    'Mnemonic path to generate wallet from',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'mnemonicLocale',
+    'Mnemonic locale to generate wallet from',
+    KEYSTORE.default.mnemonic.locale,
+    types.string,
+  )
+  .addOptionalParam(
+    'batchSize',
+    'Number of user wallets to be generated in batch',
+    undefined,
+    types.int,
+  )
+  .addFlag(
+    'connect',
+    'If true, the wallet(s) will be automatically connected to the provider',
+  )
+  .setAction(async (args: IGenerateWallets, hre) => {
+    // if default keyword, use the default phrase
+    args.mnemonicPhrase =
+      args.mnemonicPhrase == 'default'
+        ? KEYSTORE.default.mnemonic.phrase
+        : args.mnemonicPhrase
+    if (args.type.toLowerCase() == 'batch') {
+      await generateWalletBatch(
+        args.relativePath,
+        args.password,
+        args.batchSize,
+        args.entropy ? Buffer.from(args.entropy) : undefined,
+        {
+          phrase: args.mnemonicPhrase,
+          path: args.mnemonicPath || KEYSTORE.default.mnemonic.basePath,
+          locale: args.mnemonicLocale,
+        } as Mnemonic,
+        args.connect,
+      )
+    } else {
+      await generateWallet(
+        args.relativePath,
+        args.password,
+        args.entropy ? Buffer.from(args.entropy) : undefined,
+        args.privateKey,
+        {
+          phrase: args.mnemonicPhrase,
+          path: args.mnemonicPath || KEYSTORE.default.mnemonic.path,
+          locale: args.mnemonicLocale,
+        } as Mnemonic,
+        args.connect,
+      )
+    }
+  })
 
-// task("get-wallet-info", "Recover all information from an encrypted wallet or an HD Wallet")
-//   .addOptionalPositionalParam(
-//     "relativePath",
-//     "Path relative to KEYSTORE.root where the encrypted wallet is located",
-//     undefined,
-//     types.string
-//   )
-//   .addOptionalPositionalParam(
-//     "password",
-//     "Password to decrypt the wallet",
-//     KEYSTORE.default.password,
-//     types.string
-//   )
-//   .addOptionalParam(
-//     "mnemonicPhrase",
-//     "Mnemonic phrase to generate wallet from",
-//     undefined,
-//     types.string
-//   )
-//   .addOptionalParam(
-//     "mnemonicPath",
-//     "Mnemonic path to generate wallet from",
-//     KEYSTORE.default.mnemonic.path,
-//     types.string
-//   )
-//   .addOptionalParam(
-//     "mnemonicLocale",
-//     "Mnemonic locale to generate wallet from",
-//     KEYSTORE.default.mnemonic.locale,
-//     types.string
-//   )
-//   .addFlag("showPrivate", "set to true if you want to show the private key and mnemonic phrase")
-//   .setAction(async (args: IGetWalletInfo, hre) => {
-//     // console.log(path, password, showPrivate);
-//     args.mnemonicPhrase =
-//       args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
-//     let wallet: Wallet | undefined;
-//     if (args.mnemonicPhrase) {
-//       wallet = await generateWallet(undefined, undefined, undefined, undefined, {
-//         phrase: args.mnemonicPhrase,
-//         path: args.mnemonicPath,
-//         locale: args.mnemonicLocale,
-//       } as Mnemonic);
-//     } else if (args.relativePath) {
-//       wallet = await decryptWallet(args.relativePath, args.password);
-//     } else {
-//       throw new Error("Cannot get a wallet from parameters, needed path or Mnemonic");
-//     }
-//     let privateKey = wallet.privateKey;
-//     let mnemonic = wallet.mnemonic;
-//     // needed because is read-only
-//     args.mnemonicPhrase = mnemonic.phrase;
-//     if (!args.showPrivate) {
-//       privateKey = "***********";
-//       args.mnemonicPhrase = "***********";
-//     }
-//     console.log(`
-//     Wallet information:
-//       - Address: ${wallet.address}
-//       - Public Key: ${wallet.publicKey}
-//       - Private Key: ${privateKey}
-//       - Mnemonic:
-//         - Phrase: ${args.mnemonicPhrase}
-//         - Path: ${mnemonic.path}
-//         - Locale: ${mnemonic.locale}
-//       - ETH Balance (Wei): ${await hre.ethers.provider.getBalance(wallet.address)}
-//     `);
-//   });
+task(
+  'get-wallet-info',
+  'Recover all information from an encrypted wallet or an HD Wallet',
+)
+  .addOptionalPositionalParam(
+    'relativePath',
+    'Path relative to KEYSTORE.root where the encrypted wallet is located',
+    undefined,
+    types.string,
+  )
+  .addOptionalPositionalParam(
+    'password',
+    'Password to decrypt the wallet',
+    KEYSTORE.default.password,
+    types.string,
+  )
+  .addOptionalParam(
+    'mnemonicPhrase',
+    'Mnemonic phrase to generate wallet from',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'mnemonicPath',
+    'Mnemonic path to generate wallet from',
+    KEYSTORE.default.mnemonic.path,
+    types.string,
+  )
+  .addOptionalParam(
+    'mnemonicLocale',
+    'Mnemonic locale to generate wallet from',
+    KEYSTORE.default.mnemonic.locale,
+    types.string,
+  )
+  .addFlag(
+    'showPrivate',
+    'set to true if you want to show the private key and mnemonic phrase',
+  )
+  .setAction(async (args: IGetWalletInfo, hre) => {
+    // console.log(path, password, showPrivate);
+    args.mnemonicPhrase =
+      args.mnemonicPhrase == 'default'
+        ? KEYSTORE.default.mnemonic.phrase
+        : args.mnemonicPhrase
+    let wallet: Wallet | undefined
+    if (args.mnemonicPhrase) {
+      wallet = await generateWallet(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          phrase: args.mnemonicPhrase,
+          path: args.mnemonicPath,
+          locale: args.mnemonicLocale,
+        } as Mnemonic,
+      )
+    } else if (args.relativePath) {
+      wallet = await decryptWallet(args.relativePath, args.password)
+    } else {
+      throw new Error(
+        'Cannot get a wallet from parameters, needed path or Mnemonic',
+      )
+    }
+    let privateKey = wallet.privateKey
+    let mnemonic = wallet.mnemonic
+    // needed because is read-only
+    args.mnemonicPhrase = mnemonic.phrase
+    if (!args.showPrivate) {
+      privateKey = '***********'
+      args.mnemonicPhrase = '***********'
+    }
+    console.log(`
+    Wallet information:
+      - Address: ${wallet.address}
+      - Public Key: ${wallet.publicKey}
+      - Private Key: ${privateKey}
+      - Mnemonic:
+        - Phrase: ${args.mnemonicPhrase}
+        - Path: ${mnemonic.path}
+        - Locale: ${mnemonic.locale}
+      - ETH Balance (Wei): ${await hre.ethers.provider.getBalance(
+        wallet.address,
+      )}
+    `)
+  })
 
-// task("get-mnemonic", "Recover mnemonic phrase from an encrypted wallet")
-//   .addPositionalParam(
-//     "relativePath",
-//     "Path relative to KEYSTORE.root where the encrypted wallet is located",
-//     undefined,
-//     types.string
-//   )
-//   .addOptionalPositionalParam(
-//     "password",
-//     "Password to decrypt the wallet",
-//     KEYSTORE.default.password,
-//     types.string
-//   )
-//   .setAction(async (args: IGetMnemonic) => {
-//     const wallet = await decryptWallet(args.relativePath, args.password);
-//     console.log(`
-//       - Mnemonic:
-//         - Phrase: ${wallet.mnemonic.phrase}
-//         - Path: ${wallet.mnemonic.path}
-//         - Locale: ${wallet.mnemonic.locale}
-//     `);
-//   });
+task('get-mnemonic', 'Recover mnemonic phrase from an encrypted wallet')
+  .addPositionalParam(
+    'relativePath',
+    'Path relative to KEYSTORE.root where the encrypted wallet is located',
+    undefined,
+    types.string,
+  )
+  .addOptionalPositionalParam(
+    'password',
+    'Password to decrypt the wallet',
+    KEYSTORE.default.password,
+    types.string,
+  )
+  .setAction(async (args: IGetMnemonic) => {
+    const wallet = await decryptWallet(args.relativePath, args.password)
+    console.log(`
+      - Mnemonic:
+        - Phrase: ${wallet.mnemonic.phrase}
+        - Path: ${wallet.mnemonic.path}
+        - Locale: ${wallet.mnemonic.locale}
+    `)
+  })
 
-// // DEPLOYMENTS
+// DEPLOYMENTS
+
+task(
+  'initialize',
+  "Initilize the SCR environment with a ContractRegistry and an optional ContractDeployer on '--network'",
+)
+  .addFlag(
+    'deployContractDeployer',
+    'Choose whether to deploy a ContractDeployer or not',
+  )
+  .addParam(
+    'codeTrust',
+    'Address of a deployed CodeTrust Contract. You can use the helper task "deployCodeTrust" to deploy a new one.',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'existingContractRegistry',
+    'Address of a deployed ContractRegistry Contract.',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'existingContractDeployer',
+    'Address of a deployed ContractDeployer Contract.',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'relativePath',
+    'Path relative to KEYSTORE.root to store the wallets',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'password',
+    'Password to decrypt the wallet',
+    KEYSTORE.default.password,
+    types.string,
+  )
+  .addOptionalParam(
+    'mnemonicPhrase',
+    'Mnemonic phrase to generate wallet from',
+    undefined,
+    types.string,
+  )
+  .addOptionalParam(
+    'mnemonicPath',
+    'Mnemonic path to generate wallet from',
+    KEYSTORE.default.mnemonic.path,
+    types.string,
+  )
+  .addOptionalParam(
+    'mnemonicLocale',
+    'Mnemonic locale to generate wallet from',
+    KEYSTORE.default.mnemonic.locale,
+    types.string,
+  )
+  .setAction(async (args: IInitialize, hre) => {
+    await setGlobalHRE(hre)
+
+    args.mnemonicPhrase =
+      args.mnemonicPhrase == 'default'
+        ? KEYSTORE.default.mnemonic.phrase
+        : args.mnemonicPhrase
+    let wallet: Wallet | undefined
+    if (args.mnemonicPhrase) {
+      wallet = await generateWallet(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          phrase: args.mnemonicPhrase,
+          path: args.mnemonicPath,
+          locale: args.mnemonicLocale,
+        } as Mnemonic,
+        true,
+      )
+    } else if (args.relativePath) {
+      wallet = await decryptWallet(args.relativePath, args.password, true)
+    } else {
+      throw new Error(
+        'Cannot get a wallet from parameters, needed path or Mnemonic',
+      )
+    }
+    const result = await initialize(
+      args.codeTrust,
+      args.deployContractDeployer,
+      wallet,
+      args.existingContractRegistry,
+      args.existingContractDeployer,
+    )
+    console.log(JSON.stringify(result, undefined, 2))
+  })
+
 // task("deploy", "Deploy smart contracts on '--network'")
 //   .addFlag("upgradeable", "Deploy as upgradeable")
 //   .addPositionalParam(
@@ -604,14 +738,14 @@ const config: HardhatUserConfig = {
         count: KEYSTORE.default.accountNumber,
         // passphrase: KEYSTORE.default.password,
         accountsBalance: BigNumber.from(KEYSTORE.default.balance)
-          .mul(BigNumber.from("0x0de0b6b3a7640000"))
+          .mul(BigNumber.from('0x0de0b6b3a7640000'))
           .toString(),
       },
       loggingEnabled: false,
       mining: {
         auto: true,
         interval: [3000, 6000], // if auto is false then randomly generate blocks between 3 and 6 seconds
-        mempool: { order: "fifo" }, // [priority] change how transactions/blocks are procesed
+        mempool: { order: 'fifo' }, // [priority] change how transactions/blocks are procesed
       },
     },
     ganache: {
@@ -628,23 +762,23 @@ const config: HardhatUserConfig = {
   },
   gasReporter: {
     enabled: true,
-    currency: "EUR",
+    currency: 'EUR',
   },
   typechain: {
-    target: "ethers-v5",
+    target: 'ethers-v5',
     externalArtifacts: [
       // OpenZeppelin
-      "node_modules/@openzeppelin/contracts/build/contracts/ProxyAdmin.json",
-      "node_modules/@openzeppelin/contracts/build/contracts/TransparentUpgradeableProxy.json",
+      'node_modules/@openzeppelin/contracts/build/contracts/ProxyAdmin.json',
+      'node_modules/@openzeppelin/contracts/build/contracts/TransparentUpgradeableProxy.json',
       // Standard Contract Registry
-      "node_modules/standard-contract-registry/artifacts/contracts/ContractRegistry.sol/ContractRegistry.json",
-      "node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractRegistry.sol/IContractRegistry.json",
-      "node_modules/standard-contract-registry/artifacts/contracts/ContractDeployer.sol/ContractDeployer.json",
-      "node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractDeployer.sol/IContractDeployer.json",
-      "node_modules/standard-contract-registry/artifacts/contracts/UpgradeableDeployer.sol/UpgradeableDeployer.json",
-      "node_modules/standard-contract-registry/artifacts/contracts/interfaces/IUpgradeableDeployer.sol/IUpgradeableDeployer.json",
+      'node_modules/standard-contract-registry/artifacts/contracts/ContractRegistry.sol/ContractRegistry.json',
+      'node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractRegistry.sol/IContractRegistry.json',
+      'node_modules/standard-contract-registry/artifacts/contracts/ContractDeployer.sol/ContractDeployer.json',
+      'node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractDeployer.sol/IContractDeployer.json',
+      'node_modules/standard-contract-registry/artifacts/contracts/UpgradeableDeployer.sol/UpgradeableDeployer.json',
+      'node_modules/standard-contract-registry/artifacts/contracts/interfaces/IUpgradeableDeployer.sol/IUpgradeableDeployer.json',
     ],
   },
-};
+}
 
-export default config;
+export default config

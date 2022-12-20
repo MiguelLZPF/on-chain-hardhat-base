@@ -1,15 +1,16 @@
 import { CONTRACT, DEPLOY, GAS_OPT } from "configuration";
 import { ghre } from "scripts/utils";
 import * as fs from "async-file";
-import { Signer } from "ethers";
+import { Signer, ContractFactory, Contract } from "ethers";
 import { isAddress, keccak256, formatBytes32String, BytesLike } from "ethers/lib/utils";
-import { TransactionReceipt, JsonRpcProvider } from "@ethersproject/providers";
+import { TransactionReceipt, JsonRpcProvider, Provider } from "@ethersproject/providers";
 import yesno from "yesno";
 import { IRegularDeployment } from "models/Deploy";
 // Artifacts
 import * as CODE_TRUST_ARTIFACT from "node_modules/decentralized-code-trust/artifacts/contracts/CodeTrust.sol/CodeTrust.json";
 import * as CONTRACT_REGISTRY_ARTIFACT from "node_modules/standard-contract-registry/artifacts/contracts/ContractRegistry.sol/ContractRegistry.json";
 import * as CONTRACT_DEPLOYER_ARTIFACT from "node_modules/standard-contract-registry/artifacts/contracts/ContractDeployer.sol/ContractDeployer.json";
+import { CodeTrust__factory } from "node_modules/decentralized-code-trust/typechain-types";
 import {
   ContractDeployer__factory,
   ContractRegistry__factory,
@@ -17,14 +18,14 @@ import {
   IContractRegistry,
 } from "typechain-types";
 
-const ethers = ghre.ethers;
 const NAME_HEXSTRING_ZERO = formatBytes32String("");
 // Deploy contract code
 const CODE_TRUST_DEP_CODE = CODE_TRUST_ARTIFACT.deployedBytecode;
 const REGISTRY_DEP_CODE = CONTRACT_REGISTRY_ARTIFACT.deployedBytecode;
 const DEPLOYER_DEP_CODE = CONTRACT_DEPLOYER_ARTIFACT.deployedBytecode;
 
-const deployCodeTrust = async (deployer: Signer) => {
+export const deployCodeTrust = async (deployer: Signer) => {
+  const provider = deployer.provider || ghre.ethers.provider;
   if (CONTRACT.codeTrust.address) {
     const yes = await yesno({
       question: `Contract ${CONTRACT.codeTrust.name} has an address set to ${CONTRACT.codeTrust.address}. Continue to deploy new CodeTrust?`,
@@ -33,10 +34,11 @@ const deployCodeTrust = async (deployer: Signer) => {
       throw new Error("Deployment aborted");
     }
   }
-  const codeTrustFactory = await ethers.getContractFactoryFromArtifact(
-    CODE_TRUST_ARTIFACT,
+  const codeTrustFactory = new ContractFactory(
+    CODE_TRUST_ARTIFACT.abi,
+    CODE_TRUST_ARTIFACT.bytecode,
     deployer
-  );
+  ) as CodeTrust__factory;
   const codeTrust = await codeTrustFactory.deploy(GAS_OPT.max);
   const receipt = await codeTrust.deployTransaction.wait();
   if (!isAddress(codeTrust.address)) {
@@ -51,33 +53,36 @@ const deployCodeTrust = async (deployer: Signer) => {
     );
   }
   return {
-    contractName: codeTrust.name,
+    contractName: CONTRACT.codeTrust.name,
     address: codeTrust.address,
     deployTxHash: receipt.transactionHash,
-    deployTimestamp: (await ethers.provider.getBlock(receipt.blockHash)).timestamp,
+    deployTimestamp: (await provider.getBlock(receipt.blockHash)).timestamp,
     byteCodeHash: keccak256(CODE_TRUST_ARTIFACT.deployedBytecode),
   } as IRegularDeployment;
 };
 
-const initialize = async (
+export const initialize = async (
   codeTrustAddr: string,
   deployContractDeployer: boolean = true,
   systemSigner: Signer,
   existingContractRegistry?: string,
   existingContractDeployer?: string
 ) => {
+  const provider = systemSigner.provider || ghre.ethers.provider;
   // Factories needed to deploy
-  const contractRegistryFactory = ethers.getContractFactoryFromArtifact(
-    CONTRACT_REGISTRY_ARTIFACT,
+  const contractRegistryFactory = new ContractFactory(
+    CONTRACT_REGISTRY_ARTIFACT.abi,
+    CONTRACT_REGISTRY_ARTIFACT.bytecode,
     systemSigner
-  ) as Promise<ContractRegistry__factory>;
-  const contractDeployerFactory = ethers.getContractFactoryFromArtifact(
-    CONTRACT_DEPLOYER_ARTIFACT,
+  ) as ContractRegistry__factory;
+  const contractDeployerFactory = new ContractFactory(
+    CONTRACT_DEPLOYER_ARTIFACT.abi,
+    CONTRACT_DEPLOYER_ARTIFACT.bytecode,
     systemSigner
-  ) as Promise<ContractDeployer__factory>;
+  ) as ContractDeployer__factory;
   // Contracts
   // -- needed for later
-  const codeTrust = ethers.getContractAtFromArtifact(CODE_TRUST_ARTIFACT, codeTrustAddr);
+  const codeTrust = new Contract(codeTrustAddr, CODE_TRUST_ARTIFACT.abi, systemSigner);
   let contractRegistry: IContractRegistry;
   let contractDeployer: IContractDeployer | undefined;
   let registryReceipt, codeTrustReceipt: TransactionReceipt;
@@ -85,48 +90,48 @@ const initialize = async (
   // Deploy ContractRegistry
   if (existingContractRegistry) {
     // only create the contract registry instance
-    contractRegistry = (await ethers.getContractAtFromArtifact(
-      CONTRACT_REGISTRY_ARTIFACT,
+    contractRegistry = new Contract(
       existingContractRegistry,
+      CONTRACT_REGISTRY_ARTIFACT.abi,
       systemSigner
-    )) as IContractRegistry;
+    ) as IContractRegistry;
   } else {
     // deploy
     contractRegistry = await (
-      await (
-        await contractRegistryFactory
-      ).deploy(codeTrustAddr, NAME_HEXSTRING_ZERO, 0, keccak256(REGISTRY_DEP_CODE), GAS_OPT.max)
+      await contractRegistryFactory.deploy(
+        codeTrustAddr,
+        NAME_HEXSTRING_ZERO,
+        await versionDotToNum("01.00"),
+        keccak256(REGISTRY_DEP_CODE),
+        GAS_OPT.max
+      )
     ).deployed();
   }
   // Deploy ContractDeployer
   if (existingContractDeployer) {
     // only create the contract deployer instance
-    contractDeployer = (await ethers.getContractAtFromArtifact(
-      CONTRACT_DEPLOYER_ARTIFACT,
+    contractDeployer = new Contract(
       existingContractDeployer,
+      CONTRACT_DEPLOYER_ARTIFACT.abi,
       systemSigner
-    )) as IContractDeployer;
+    ) as IContractDeployer;
   } else if (deployContractDeployer) {
     // deploy
     contractDeployer = await (
-      await (await contractDeployerFactory).deploy(contractRegistry.address, GAS_OPT.max)
+      await contractDeployerFactory.deploy(contractRegistry.address, GAS_OPT.max)
     ).deployed();
   }
-  codeTrustReceipt = await (await codeTrust).deployTransaction.wait();
+  codeTrustReceipt = await codeTrust.deployTransaction.wait();
   registryReceipt = await contractRegistry.deployTransaction.wait();
   deployerReceipt = contractDeployer ? await contractDeployer.deployTransaction.wait() : undefined;
   // Get all blocks
-  const codeTrustBlock = ethers.provider.getBlock(codeTrustReceipt.blockHash);
-  const registryBlock = ethers.provider.getBlock(registryReceipt.blockHash);
-  const deployerBlock = deployerReceipt
-    ? ethers.provider.getBlock(deployerReceipt.blockHash)
-    : undefined;
+  const codeTrustBlock = provider.getBlock(codeTrustReceipt.blockHash);
+  const registryBlock = provider.getBlock(registryReceipt.blockHash);
+  const deployerBlock = deployerReceipt ? provider.getBlock(deployerReceipt.blockHash) : undefined;
   // Get deployed code for each contract
-  const codeTrustDepCode = ethers.provider.getCode((await codeTrust).address);
-  const registryDepCode = ethers.provider.getCode(contractRegistry.address);
-  const deployerDepCode = contractDeployer
-    ? ethers.provider.getCode(contractDeployer.address)
-    : undefined;
+  const codeTrustDepCode = provider.getCode((await codeTrust).address);
+  const registryDepCode = provider.getCode(contractRegistry.address);
+  const deployerDepCode = contractDeployer ? provider.getCode(contractDeployer.address) : undefined;
   // Get hash of the deployed code
   const codeTrustDepCodeHash = keccak256(await codeTrustDepCode);
   const registryDepCodeHash = keccak256(await registryDepCode);
@@ -150,8 +155,8 @@ const initialize = async (
   );
   const codeTrustRecord = register(
     CONTRACT.codeTrust.name,
-    (await codeTrust).address,
-    (await codeTrust).address,
+    codeTrust.address,
+    codeTrust.address,
     "01.00",
     codeTrustDepCodeHash,
     systemSigner,
@@ -179,14 +184,13 @@ const initialize = async (
     throw new Error(`ERROR: bad ${CONTRACT.contractDeployer.name} record`);
   }
   // Save ContractRegistry deploy information
-  await fs.writeFile(
-    DEPLOY.deploymentsPath,
-    JSON.stringify({
-      codeTrust: codeTrustRecord,
-      contractRegistry: registryRecord,
-      contractDeployer: deployerRecord,
-    })
-  );
+  const objectToSave = {
+    codeTrust: codeTrustRecord,
+    contractRegistry: registryRecord,
+    contractDeployer: deployerRecord,
+  };
+  await fs.writeFile(DEPLOY.deploymentsPath, JSON.stringify(objectToSave));
+  return objectToSave;
 };
 
 const registerByName = async (contractName: any /*TODO*/) => {};
@@ -200,8 +204,9 @@ const register = async (
   admin: Signer,
   contractRegistry?: string | IContractRegistry
 ) => {
+  const provider = admin.provider || ghre.ethers.provider;
   const adminAddr = admin.getAddress();
-  contractRegistry = await createRegistryInstance(contractRegistry, ethers.provider);
+  contractRegistry = await createRegistryInstance(contractRegistry, provider);
   const nameBytes = formatBytes32String(recordName);
   const versionNumber = await versionDotToNum(version);
 
@@ -228,7 +233,10 @@ const getRecord = async (
   version?: string,
   contractRegistry?: string | IContractRegistry
 ) => {
-  contractRegistry = await createRegistryInstance(contractRegistry, ethers.provider);
+  contractRegistry = await createRegistryInstance(
+    contractRegistry,
+    typeof contractRegistry != "string" ? contractRegistry?.provider : undefined
+  );
   const nameBytes = formatBytes32String(recordName);
   const versionNumber = version ? await versionDotToNum(version) : undefined;
 
@@ -245,16 +253,18 @@ const getRecord = async (
 
 const createRegistryInstance = async (
   registry?: IContractRegistry | string,
-  signerOrProvider?: Signer | JsonRpcProvider
+  signerOrProvider: Signer | Provider | JsonRpcProvider = ghre.ethers.provider
 ) => {
   if (registry && typeof registry == "string") {
     // we have the registry address
-    registry = (
-      await ethers.getContractAtFromArtifact(CONTRACT_REGISTRY_ARTIFACT, registry)
-    ).connect(signerOrProvider || ethers.provider) as IContractRegistry;
+    registry = new Contract(
+      registry,
+      CONTRACT_REGISTRY_ARTIFACT.abi,
+      signerOrProvider
+    ) as IContractRegistry;
   } else if (registry) {
     // we have the registry instance
-    registry = (registry as IContractRegistry).connect(signerOrProvider || ethers.provider);
+    registry = (registry as IContractRegistry).connect(signerOrProvider);
   } else {
     // no registry, use the deployment file
     if (!(await fs.exists(DEPLOY.deploymentsPath))) {
@@ -264,12 +274,11 @@ const createRegistryInstance = async (
     }
     const registryDeployment = JSON.parse(await fs.readFile(DEPLOY.deploymentsPath));
 
-    registry = (
-      await ethers.getContractAtFromArtifact(
-        CONTRACT_REGISTRY_ARTIFACT,
-        registryDeployment.contractRegistry.proxy
-      )
-    ).connect(signerOrProvider || ethers.provider) as IContractRegistry;
+    registry = new Contract(
+      registryDeployment.contractRegistry.proxy,
+      CONTRACT_REGISTRY_ARTIFACT.abi,
+      signerOrProvider
+    ) as IContractRegistry;
   }
   return registry;
 };

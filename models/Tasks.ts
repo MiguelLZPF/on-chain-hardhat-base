@@ -26,6 +26,18 @@ export interface IGetMnemonic {
   password: string;
 }
 
+export interface IInitialize {
+  deployContractDeployer?: boolean;
+  codeTrust: string;
+  existingContractRegistry?: string;
+  existingContractDeployer?: string;
+  relativePath?: string;
+  password: string;
+  mnemonicPhrase?: string;
+  mnemonicPath: string;
+  mnemonicLocale: string;
+}
+
 export interface IDeploy {
   upgradeable: boolean;
   contractName: string;
