@@ -2,7 +2,7 @@ import { CONTRACT, DEPLOY, GAS_OPT } from "configuration";
 import { ghre } from "scripts/utils";
 import * as fs from "async-file";
 import { Signer, ContractFactory, Contract } from "ethers";
-import { isAddress, keccak256, formatBytes32String, BytesLike } from "ethers/lib/utils";
+import { isAddress, keccak256, formatBytes32String, parseBytes32String, BytesLike } from "ethers/lib/utils";
 import { TransactionReceipt, JsonRpcProvider, Provider } from "@ethersproject/providers";
 import yesno from "yesno";
 import { IRegularDeployment } from "models/Deploy";
@@ -11,12 +11,14 @@ import * as CODE_TRUST_ARTIFACT from "node_modules/decentralized-code-trust/arti
 import * as CONTRACT_REGISTRY_ARTIFACT from "node_modules/standard-contract-registry/artifacts/contracts/ContractRegistry.sol/ContractRegistry.json";
 import * as CONTRACT_DEPLOYER_ARTIFACT from "node_modules/standard-contract-registry/artifacts/contracts/ContractDeployer.sol/ContractDeployer.json";
 import { CodeTrust__factory } from "node_modules/decentralized-code-trust/typechain-types";
+import { ContractRecordStructOutput } from "node_modules/standard-contract-registry/typechain-types/artifacts/contracts/ContractRegistry";
 import {
   ContractDeployer__factory,
   ContractRegistry__factory,
   IContractDeployer,
   IContractRegistry,
 } from "typechain-types";
+import { IDecodedRecord } from "models/StandardContractRegistry";
 
 const NAME_HEXSTRING_ZERO = formatBytes32String("");
 // Deploy contract code
@@ -156,7 +158,7 @@ export const initialize = async (
     undefined,
     contractRegistry
   );
-  const codeTrustRecord = register(
+  const codeTrustRecord = await register(
     CONTRACT.codeTrust.name,
     codeTrust.address,
     codeTrust.address,
@@ -165,9 +167,8 @@ export const initialize = async (
     systemSigner,
     contractRegistry
   );
-  console.log(await codeTrustRecord, await registryRecord);
   const deployerRecord = contractDeployer
-    ? register(
+    ? await register(
         CONTRACT.contractDeployer.name,
         contractDeployer.address,
         contractDeployer.address,
@@ -178,21 +179,21 @@ export const initialize = async (
       )
     : undefined;
     // Check deployments and registrations
-  if (!(await codeTrustRecord) || !(await codeTrustRecord).name) {
+  if (!codeTrustRecord || !codeTrustRecord.name) {
     throw new Error(`ERROR: bad ${CONTRACT.codeTrust.name} record`);
   }
   if (!(await registryRecord) || !(await registryRecord).name) {
     throw new Error(`ERROR: bad ${CONTRACT.contractRegistry.name} record`);
   }
-  if (contractDeployer && (!(await deployerRecord) || !(await deployerRecord)!.name)) {
+  if (contractDeployer && (!deployerRecord || !deployerRecord!.name)) {
     throw new Error(`ERROR: bad ${CONTRACT.contractDeployer.name} record`);
   }
   
   // Save ContractRegistry deploy information
   const objectToSave = {
-    codeTrust: await codeTrustRecord,
+    codeTrust: codeTrustRecord,
     contractRegistry: await registryRecord,
-    contractDeployer: await deployerRecord,
+    contractDeployer: deployerRecord,
   };
   await fs.writeFile(DEPLOY.deploymentsPath, JSON.stringify(objectToSave));
   return objectToSave;
@@ -251,8 +252,21 @@ const getRecord = async (
       `ERROR: contract ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${admin}`
     );
   }
-  return result.record;
+  return {...result.record};
 };
+
+const decodedRecord = async (record: ContractRecordStructOutput) => {
+  return {
+    name: parseBytes32String(record.name),
+    proxy: record.proxy == record.logic ? undefined : record.proxy,
+    logic: record.logic,
+    admin: record.admin,
+    version: await versionNumToDot(record.version),
+    logicCodeHash: record.logicCodeHash,
+    extraData: record.extraData || record.extraData != "0x" ? record.extraData : undefined,
+    timestamp: new Date(record.timestamp.mul(1000).toNumber())
+  } as IDecodedRecord;
+}
 
 // UTILITY FUNCTIONS
 

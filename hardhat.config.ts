@@ -262,7 +262,12 @@ task(
     undefined,
     types.string
   )
-  .addOptionalParam("deployContractDeployer", "Choose whether to deploy a ContractDeployer or not", undefined, types.boolean)
+  .addOptionalParam(
+    "deployContractDeployer",
+    "Choose whether to deploy a ContractDeployer or not",
+    undefined,
+    types.boolean
+  )
   .addOptionalParam(
     "existingContractRegistry",
     "Address of a deployed ContractRegistry Contract.",
@@ -336,7 +341,12 @@ task(
       args.existingContractRegistry,
       args.existingContractDeployer
     );
-    console.log(JSON.stringify(result, undefined, 2));
+    console.log(`
+      OnChain Registry Initialized Successfully:
+        - CodeTrust: ${result.codeTrust.logic}
+        - ContractRegistry: ${result.contractRegistry.logic}
+        - ContractDeployer: ${result.contractDeployer?.logic}
+    `);
   });
 
 // task("deploy", "Deploy smart contracts on '--network'")
@@ -736,7 +746,7 @@ const config: HardhatUserConfig = {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 10
+        runs: 10,
       },
       evmVersion: BLOCKCHAIN.default.evm,
     },
