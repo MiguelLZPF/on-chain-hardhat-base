@@ -20,9 +20,17 @@ import {
   IGetMnemonic,
   IGetWalletInfo,
   IInitialize,
+  IRegister,
   IUpgrade,
 } from "./models/Tasks";
-import { deployCodeTrust, initialize } from "scripts/standardContractRegistry";
+import {
+  decodeRecord,
+  deployCodeTrust,
+  initialize,
+  register,
+  registerByName,
+} from "scripts/standardContractRegistry";
+import { ContractRecordStructOutput } from "standard-contract-registry/typechain-types/artifacts/contracts/ContractRegistry";
 
 //* TASKS
 task("generate-wallets", "Generates Encryped JSON persistent wallets")
@@ -347,6 +355,131 @@ task(
         - ContractRegistry: ${result.contractRegistry.logic}
         - ContractDeployer: ${result.contractDeployer?.logic}
     `);
+  });
+
+task("register", "Register a contract into the ContractRegistry as a ContractRecord")
+  .addOptionalParam(
+    "contractName",
+    "Name of a Contract that is compiled in this project's environment",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "recordName",
+    "If set name to be used to identify the contract record. Default = ContractName",
+    undefined,
+    types.string
+  )
+  .addParam(
+    "logic",
+    "The logic contract's address. This address is mandatory",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "proxy",
+    "When deploying an Upgradeable Contract, the proxy address. Default = logic",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "version",
+    "Version of the contract to be registered. Format is dotted string (ex. '01.04'), default = '01.00'",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "Address of a deployed ContractRegistry Contract. You need to initialize the environment (using initialize task)",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .addFlag("noCompile", "Do not compile contracts before registering the contract")
+  .setAction(async (args: IRegister, hre) => {
+    await setGlobalHRE(hre);
+    if (!args.noCompile) {
+      await hre.run("compile");
+    }
+    // console.log(args);
+    args.mnemonicPhrase =
+      args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
+    let wallet: Wallet | undefined;
+    if (args.mnemonicPhrase) {
+      wallet = await generateWallet(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          phrase: args.mnemonicPhrase,
+          path: args.mnemonicPath,
+          locale: args.mnemonicLocale,
+        } as Mnemonic,
+        true
+      );
+    } else if (args.relativePath) {
+      wallet = await decryptWallet(args.relativePath, args.password, true);
+    } else {
+      throw new Error("Cannot get a wallet from parameters, needed path or Mnemonic");
+    }
+
+    // Register
+    let result: ContractRecordStructOutput;
+    if (args.contractName) {
+      result = await registerByName(
+        args.contractName,
+        args.logic,
+        wallet,
+        args.recordName,
+        args.proxy || args.logic,
+        args.version || "01.00",
+        args.contractRegistry
+      );
+    } else if (args.logicCodeHash) {
+      result = await register(
+        args.recordName!,
+        args.proxy || args.logic,
+        args.logic,
+        args.version || "01.00",
+        args.logicCodeHash,
+        wallet,
+        args.contractRegistry
+      );
+    } else {
+      throw new Error(`ERROR: cannot register without contractName and logicCodeHash`);
+    }
+
+    console.log(await decodeRecord(result));
   });
 
 // task("deploy", "Deploy smart contracts on '--network'")

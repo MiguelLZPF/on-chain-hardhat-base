@@ -2,7 +2,13 @@ import { CONTRACT, DEPLOY, GAS_OPT } from "configuration";
 import { ghre } from "scripts/utils";
 import * as fs from "async-file";
 import { Signer, ContractFactory, Contract } from "ethers";
-import { isAddress, keccak256, formatBytes32String, parseBytes32String, BytesLike } from "ethers/lib/utils";
+import {
+  isAddress,
+  keccak256,
+  formatBytes32String,
+  parseBytes32String,
+  BytesLike,
+} from "ethers/lib/utils";
 import { TransactionReceipt, JsonRpcProvider, Provider } from "@ethersproject/providers";
 import yesno from "yesno";
 import { IRegularDeployment } from "models/Deploy";
@@ -178,7 +184,7 @@ export const initialize = async (
         contractRegistry
       )
     : undefined;
-    // Check deployments and registrations
+  // Check deployments and registrations
   if (!codeTrustRecord || !codeTrustRecord.name) {
     throw new Error(`ERROR: bad ${CONTRACT.codeTrust.name} record`);
   }
@@ -188,7 +194,7 @@ export const initialize = async (
   if (contractDeployer && (!deployerRecord || !deployerRecord!.name)) {
     throw new Error(`ERROR: bad ${CONTRACT.contractDeployer.name} record`);
   }
-  
+
   // Save ContractRegistry deploy information
   const objectToSave = {
     codeTrust: codeTrustRecord,
@@ -199,9 +205,30 @@ export const initialize = async (
   return objectToSave;
 };
 
-const registerByName = async (contractName: any /*TODO*/) => {};
+export const registerByName = async (
+  contractName: string,
+  logic: string,
+  admin: Signer,
+  recordName?: string,
+  proxy?: string,
+  version?: string,
+  contractRegistry?: string | IContractRegistry
+) => {
+  const contractFactory = await ghre.ethers.getContractFactory(contractName, admin);
+  const logicCodeHash = keccak256(contractFactory.getDeployTransaction().data!);
 
-const register = async (
+  return register(
+    recordName || contractName,
+    proxy || logic,
+    logic,
+    version || "01.00",
+    logicCodeHash,
+    admin,
+    contractRegistry
+  );
+};
+
+export const register = async (
   recordName: string,
   proxy: string,
   logic: string,
@@ -210,7 +237,6 @@ const register = async (
   admin: Signer,
   contractRegistry?: string | IContractRegistry
 ) => {
-  const provider = admin.provider || ghre.ethers.provider;
   const adminAddr = admin.getAddress();
   contractRegistry = await createRegistryInstance(contractRegistry, admin);
   const nameBytes = formatBytes32String(recordName);
@@ -252,10 +278,10 @@ const getRecord = async (
       `ERROR: contract ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${admin}`
     );
   }
-  return {...result.record};
+  return { ...result.record };
 };
 
-const decodedRecord = async (record: ContractRecordStructOutput) => {
+export const decodeRecord = async (record: ContractRecordStructOutput) => {
   return {
     name: parseBytes32String(record.name),
     proxy: record.proxy == record.logic ? undefined : record.proxy,
@@ -264,9 +290,9 @@ const decodedRecord = async (record: ContractRecordStructOutput) => {
     version: await versionNumToDot(record.version),
     logicCodeHash: record.logicCodeHash,
     extraData: record.extraData || record.extraData != "0x" ? record.extraData : undefined,
-    timestamp: new Date(record.timestamp.mul(1000).toNumber())
+    timestamp: new Date(record.timestamp.mul(1000).toNumber()),
   } as IDecodedRecord;
-}
+};
 
 // UTILITY FUNCTIONS
 

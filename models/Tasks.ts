@@ -46,6 +46,22 @@ export interface IInitialize {
   mnemonicLocale: string;
 }
 
+export interface IRegister {
+  contractName?: string;
+  recordName?: string;
+  logic: string;
+  proxy?: string;
+  version?: string;
+  logicCodeHash?: string;
+  contractRegistry?: string;
+  relativePath?: string;
+  password: string;
+  mnemonicPhrase?: string;
+  mnemonicPath: string;
+  mnemonicLocale: string;
+  noCompile: boolean;
+}
+
 export interface IDeploy {
   upgradeable: boolean;
   contractName: string;
