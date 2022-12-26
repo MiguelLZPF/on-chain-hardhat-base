@@ -8,18 +8,21 @@ import { Mnemonic } from "ethers/lib/utils";
 import { BLOCKCHAIN, CONTRACT, DEPLOY, KEYSTORE } from "./configuration";
 import * as fs from "async-file";
 import { decryptWallet, generateWallet, generateWalletBatch } from "./scripts/wallets";
-import { changeLogic, deploy, deployUpgradeable, getLogic, upgrade } from "./scripts/deploy";
+import { changeLogic, deploy, getLogic } from "./scripts/deploy";
 import { setGlobalHRE } from "./scripts/utils";
 import {
   ICallContract,
   IChangeLogic,
   IDeploy,
+  IDeployCodeTrust,
   IGenerateWallets,
   IGetLogic,
   IGetMnemonic,
   IGetWalletInfo,
+  IInitialize,
   IUpgrade,
 } from "./models/Tasks";
+import { deployCodeTrust, initialize } from "scripts/standardContractRegistry";
 
 //* TASKS
 task("generate-wallets", "Generates Encryped JSON persistent wallets")
@@ -189,14 +192,7 @@ task("get-mnemonic", "Recover mnemonic phrase from an encrypted wallet")
   });
 
 // DEPLOYMENTS
-task("deploy", "Deploy smart contracts on '--network'")
-  .addFlag("upgradeable", "Deploy as upgradeable")
-  .addPositionalParam(
-    "contractName",
-    "Name of the contract to deploy",
-    CONTRACT[0].name,
-    types.string
-  )
+task("deploy-code-trust", "Helper task to Deploy a new CodeTrust Contract on '--network'")
   .addOptionalParam(
     "relativePath",
     "Path relative to KEYSTORE.root to store the wallets",
@@ -227,25 +223,10 @@ task("deploy", "Deploy smart contracts on '--network'")
     KEYSTORE.default.mnemonic.locale,
     types.string
   )
-  .addOptionalParam(
-    "proxyAdmin",
-    "Address of a deloyed Proxy Admin. Only if --upgradeable deployment",
-    DEPLOY.proxyAdmin.address,
-    types.string
-  )
-  .addOptionalParam(
-    "contractArgs",
-    "Contract initialize function's arguments if any",
-    [],
-    types.json
-  )
-  .addFlag("noCompile", "Do not compile contracts before deploy")
-  .addOptionalParam("txValue", "Contract creation transaction value if any", undefined, types.int)
-  .setAction(async (args: IDeploy, hre) => {
+  .setAction(async (args: IDeployCodeTrust, hre) => {
+    // Set HRE so the other scripts can have context of the environment (provider)
     await setGlobalHRE(hre);
-    if (!args.noCompile) {
-      await hre.run("compile");
-    }
+    // Get the Signer of the transactions
     args.mnemonicPhrase =
       args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
     let wallet: Wallet | undefined;
@@ -267,213 +248,38 @@ task("deploy", "Deploy smart contracts on '--network'")
     } else {
       throw new Error("Cannot get a wallet from parameters, needed path or Mnemonic");
     }
-    if (args.upgradeable) {
-      await deployUpgradeable(
-        args.contractName,
-        wallet,
-        args.contractArgs,
-        args.txValue,
-        args.proxyAdmin
-      );
-    } else {
-      await deploy(args.contractName, wallet, args.contractArgs, args.txValue);
-    }
-  });
-
-task("upgrade", "Upgrade smart contracts on '--network'")
-  .addPositionalParam("contractName", "Name of the contract to deploy", undefined, types.string)
-  .addPositionalParam("proxy", "Address of the TUP proxy", undefined, types.string)
-  .addOptionalParam(
-    "relativePath",
-    "Path relative to KEYSTORE.root to store the wallets",
-    undefined,
-    types.string
-  )
-  .addOptionalParam(
-    "password",
-    "Password to decrypt the wallet",
-    KEYSTORE.default.password,
-    types.string
-  )
-  .addOptionalParam(
-    "mnemonicPhrase",
-    "Mnemonic phrase to generate wallet from",
-    undefined,
-    types.string
-  )
-  .addOptionalParam(
-    "mnemonicPath",
-    "Mnemonic path to generate wallet from",
-    KEYSTORE.default.mnemonic.path,
-    types.string
-  )
-  .addOptionalParam(
-    "mnemonicLocale",
-    "Mnemonic locale to generate wallet from",
-    KEYSTORE.default.mnemonic.locale,
-    types.string
-  )
-  .addOptionalParam(
-    "proxyAdmin",
-    "Address of a deloyed Proxy Admin",
-    DEPLOY.proxyAdmin.address,
-    types.string
-  )
-  .addOptionalParam(
-    "contractArgs",
-    "Contract initialize function's arguments if any",
-    [],
-    types.json
-  )
-  .addFlag("noCompile", "Do not compile contracts before upgrade")
-  .setAction(async (args: IUpgrade, hre) => {
-    await setGlobalHRE(hre);
-    if (!args.noCompile) {
-      await hre.run("compile");
-    }
-    args.mnemonicPhrase =
-      args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
-    let wallet: Wallet | undefined;
-    if (args.mnemonicPhrase) {
-      wallet = await generateWallet(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        {
-          phrase: args.mnemonicPhrase,
-          path: args.mnemonicPath,
-          locale: args.mnemonicLocale,
-        } as Mnemonic,
-        true
-      );
-    } else if (args.relativePath) {
-      wallet = await decryptWallet(args.relativePath, args.password, true);
-    } else {
-      throw new Error("Cannot get a wallet from parameters, needed path or Mnemonic");
-    }
-    await upgrade(args.contractName, wallet, args.contractArgs, args.proxy, args.proxyAdmin);
-  });
-
-task("call-contract", "Call a contract function (this does not change contract storage or state)")
-  .addPositionalParam(
-    "contractName",
-    "the name of the contract to get the ABI",
-    undefined,
-    types.string
-  )
-  .addPositionalParam(
-    "contractAddress",
-    "the address where de contract is located",
-    undefined,
-    types.string
-  )
-  .addPositionalParam("functionName", "the name of the function to call", undefined, types.string)
-  .addOptionalPositionalParam(
-    "functionArgs",
-    "the arguments to pass to the function",
-    [],
-    types.json
-  )
-  .addOptionalParam("artifactPath", "the path to the artifact file", undefined, types.string)
-  .addOptionalParam(
-    "relativePath",
-    "Path relative to KEYSTORE.root to store the wallets",
-    undefined,
-    types.string
-  )
-  .addOptionalParam(
-    "password",
-    "Password to decrypt the wallet",
-    KEYSTORE.default.password,
-    types.string
-  )
-  .addOptionalParam(
-    "mnemonicPhrase",
-    "Mnemonic phrase to generate wallet from",
-    undefined,
-    types.string
-  )
-  .addOptionalParam(
-    "mnemonicPath",
-    "Mnemonic path to generate wallet from",
-    KEYSTORE.default.mnemonic.path,
-    types.string
-  )
-  .addOptionalParam(
-    "mnemonicLocale",
-    "Mnemonic locale to generate wallet from",
-    KEYSTORE.default.mnemonic.locale,
-    types.string
-  )
-  .setAction(async (args: ICallContract, hre) => {
-    setGlobalHRE(hre);
-    const artifact = JSON.parse(
-      await fs.readFile(
-        args.artifactPath ||
-          `artifacts/contracts/${args.contractName}.sol/${args.contractName}.json`
-      )
-    );
-    args.mnemonicPhrase =
-      args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
-    let wallet: Wallet | undefined;
-    if (args.mnemonicPhrase) {
-      wallet = await generateWallet(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        {
-          phrase: args.mnemonicPhrase,
-          path: args.mnemonicPath,
-          locale: args.mnemonicLocale,
-        } as Mnemonic,
-        true
-      );
-    } else if (args.relativePath) {
-      wallet = await decryptWallet(args.relativePath, args.password, true);
-    }
-    console.log(
-      `Calling Smart Contract ${args.contractName}.${args.functionName}(${args.functionArgs}) at ${args.contractAddress}...`
-    );
-    console.log(
-      "Result: ",
-      await new Contract(
-        args.contractAddress,
-        artifact.abi,
-        wallet || hre.ethers.provider
-      ).callStatic[args.functionName](...args.functionArgs)
-    );
+    const result = await deployCodeTrust(wallet);
+    console.log(JSON.stringify(result, undefined, 2));
   });
 
 task(
-  "get-logic",
-  "Check what logic|implementation smart contract address is currently using a given proxy"
+  "initialize",
+  "Initilize the SCR environment with a ContractRegistry and an optional ContractDeployer on '--network'"
 )
-  .addPositionalParam("proxy", "address of the proxy|storage contract", undefined, types.string)
-  .addOptionalParam("proxyAdmin", "Address of a deloyed Proxy Admin", undefined, types.string)
-  .setAction(async (args: IGetLogic, hre: HardhatRuntimeEnvironment) => {
-    setGlobalHRE(hre);
-
-    const { logicFromProxy, adminFromProxy, logicFromAdmin, adminFromAdmin } = await getLogic(
-      args.proxy,
-      args.proxyAdmin,
-      hre
-    );
-
-    console.log(`
-          Logic contract information:
-            - Logic (from Proxy's storage): ${logicFromProxy}
-            - Admin (from Proxy's storage): ${adminFromProxy}
-            - Logic (from Admin): ${logicFromAdmin}
-            - Admin (from Admin): ${adminFromAdmin}
-        `);
-  });
-
-task("change-logic", "change the actual logic|implementation smart contract of a TUP proxy")
-  .addPositionalParam("proxy", "address of the proxy|storage contract", undefined, types.string)
-  .addOptionalParam("proxyAdmin", "Address of a deloyed Proxy Admin", undefined, types.string)
-  .addParam("newLogic", "Address of the new logic|implementation contract", undefined, types.string)
+  .addParam(
+    "codeTrust",
+    'Address of a deployed CodeTrust Contract. You can use the helper task "deployCodeTrust" to deploy a new one.',
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "deployContractDeployer",
+    "Choose whether to deploy a ContractDeployer or not",
+    undefined,
+    types.boolean
+  )
+  .addOptionalParam(
+    "existingContractRegistry",
+    "Address of a deployed ContractRegistry Contract.",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "existingContractDeployer",
+    "Address of a deployed ContractDeployer Contract.",
+    undefined,
+    types.string
+  )
   .addOptionalParam(
     "relativePath",
     "Path relative to KEYSTORE.root to store the wallets",
@@ -504,9 +310,9 @@ task("change-logic", "change the actual logic|implementation smart contract of a
     KEYSTORE.default.mnemonic.locale,
     types.string
   )
-  .setAction(async (args: IChangeLogic, hre: HardhatRuntimeEnvironment) => {
-    setGlobalHRE(hre);
-
+  .setAction(async (args: IInitialize, hre) => {
+    await setGlobalHRE(hre);
+    // console.log(args);
     args.mnemonicPhrase =
       args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
     let wallet: Wallet | undefined;
@@ -518,7 +324,7 @@ task("change-logic", "change the actual logic|implementation smart contract of a
         undefined,
         {
           phrase: args.mnemonicPhrase,
-          path: `${args.mnemonicPath}/0`,
+          path: args.mnemonicPath,
           locale: args.mnemonicLocale,
         } as Mnemonic,
         true
@@ -526,23 +332,377 @@ task("change-logic", "change the actual logic|implementation smart contract of a
     } else if (args.relativePath) {
       wallet = await decryptWallet(args.relativePath, args.password, true);
     } else {
-      throw new Error("ERROR: signer required to perform this task");
+      throw new Error("Cannot get a wallet from parameters, needed path or Mnemonic");
     }
-
-    const { previousLogic, actualLogic, receipt } = await changeLogic(
-      args.proxy,
-      args.newLogic,
-      wallet!,
-      args.proxyAdmin
+    const result = await initialize(
+      args.codeTrust,
+      args.deployContractDeployer,
+      wallet,
+      args.existingContractRegistry,
+      args.existingContractDeployer
     );
     console.log(`
-          Logic changed successfully:
-            - Previous Logic: ${previousLogic}
-            - Actual Logic: ${actualLogic}
-            - Transaction: ${receipt.transactionHash}
-            - Block: ${receipt.blockHash}
-        `);
+      OnChain Registry Initialized Successfully:
+        - CodeTrust: ${result.codeTrust.logic}
+        - ContractRegistry: ${result.contractRegistry.logic}
+        - ContractDeployer: ${result.contractDeployer?.logic}
+    `);
   });
+
+// task("deploy", "Deploy smart contracts on '--network'")
+//   .addFlag("upgradeable", "Deploy as upgradeable")
+//   .addPositionalParam(
+//     "contractName",
+//     "Name of the contract to deploy",
+//     CONTRACT[0].name,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "relativePath",
+//     "Path relative to KEYSTORE.root to store the wallets",
+//     undefined,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "password",
+//     "Password to decrypt the wallet",
+//     KEYSTORE.default.password,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicPhrase",
+//     "Mnemonic phrase to generate wallet from",
+//     undefined,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicPath",
+//     "Mnemonic path to generate wallet from",
+//     KEYSTORE.default.mnemonic.path,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicLocale",
+//     "Mnemonic locale to generate wallet from",
+//     KEYSTORE.default.mnemonic.locale,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "proxyAdmin",
+//     "Address of a deloyed Proxy Admin. Only if --upgradeable deployment",
+//     DEPLOY.proxyAdmin.address,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "contractArgs",
+//     "Contract initialize function's arguments if any",
+//     [],
+//     types.json
+//   )
+//   .addFlag("noCompile", "Do not compile contracts before deploy")
+//   .addOptionalParam("txValue", "Contract creation transaction value if any", undefined, types.int)
+//   .setAction(async (args: IDeploy, hre) => {
+//     await setGlobalHRE(hre);
+//     if (!args.noCompile) {
+//       await hre.run("compile");
+//     }
+//     args.mnemonicPhrase =
+//       args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
+//     let wallet: Wallet | undefined;
+//     if (args.mnemonicPhrase) {
+//       wallet = await generateWallet(
+//         undefined,
+//         undefined,
+//         undefined,
+//         undefined,
+//         {
+//           phrase: args.mnemonicPhrase,
+//           path: args.mnemonicPath,
+//           locale: args.mnemonicLocale,
+//         } as Mnemonic,
+//         true
+//       );
+//     } else if (args.relativePath) {
+//       wallet = await decryptWallet(args.relativePath, args.password, true);
+//     } else {
+//       throw new Error("Cannot get a wallet from parameters, needed path or Mnemonic");
+//     }
+//     if (args.upgradeable) {
+//       await deployUpgradeable(
+//         args.contractName,
+//         wallet,
+//         args.contractArgs,
+//         args.txValue,
+//         args.proxyAdmin
+//       );
+//     } else {
+//       await deploy(args.contractName, wallet, args.contractArgs, args.txValue);
+//     }
+//   });
+
+// task("upgrade", "Upgrade smart contracts on '--network'")
+//   .addPositionalParam("contractName", "Name of the contract to deploy", undefined, types.string)
+//   .addPositionalParam("proxy", "Address of the TUP proxy", undefined, types.string)
+//   .addOptionalParam(
+//     "relativePath",
+//     "Path relative to KEYSTORE.root to store the wallets",
+//     undefined,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "password",
+//     "Password to decrypt the wallet",
+//     KEYSTORE.default.password,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicPhrase",
+//     "Mnemonic phrase to generate wallet from",
+//     undefined,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicPath",
+//     "Mnemonic path to generate wallet from",
+//     KEYSTORE.default.mnemonic.path,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicLocale",
+//     "Mnemonic locale to generate wallet from",
+//     KEYSTORE.default.mnemonic.locale,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "proxyAdmin",
+//     "Address of a deloyed Proxy Admin",
+//     DEPLOY.proxyAdmin.address,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "contractArgs",
+//     "Contract initialize function's arguments if any",
+//     [],
+//     types.json
+//   )
+//   .addFlag("noCompile", "Do not compile contracts before upgrade")
+//   .setAction(async (args: IUpgrade, hre) => {
+//     await setGlobalHRE(hre);
+//     if (!args.noCompile) {
+//       await hre.run("compile");
+//     }
+//     args.mnemonicPhrase =
+//       args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
+//     let wallet: Wallet | undefined;
+//     if (args.mnemonicPhrase) {
+//       wallet = await generateWallet(
+//         undefined,
+//         undefined,
+//         undefined,
+//         undefined,
+//         {
+//           phrase: args.mnemonicPhrase,
+//           path: args.mnemonicPath,
+//           locale: args.mnemonicLocale,
+//         } as Mnemonic,
+//         true
+//       );
+//     } else if (args.relativePath) {
+//       wallet = await decryptWallet(args.relativePath, args.password, true);
+//     } else {
+//       throw new Error("Cannot get a wallet from parameters, needed path or Mnemonic");
+//     }
+//     await upgrade(args.contractName, wallet, args.contractArgs, args.proxy, args.proxyAdmin);
+//   });
+
+// task("call-contract", "Call a contract function (this does not change contract storage or state)")
+//   .addPositionalParam(
+//     "contractName",
+//     "the name of the contract to get the ABI",
+//     undefined,
+//     types.string
+//   )
+//   .addPositionalParam(
+//     "contractAddress",
+//     "the address where de contract is located",
+//     undefined,
+//     types.string
+//   )
+//   .addPositionalParam("functionName", "the name of the function to call", undefined, types.string)
+//   .addOptionalPositionalParam(
+//     "functionArgs",
+//     "the arguments to pass to the function",
+//     [],
+//     types.json
+//   )
+//   .addOptionalParam("artifactPath", "the path to the artifact file", undefined, types.string)
+//   .addOptionalParam(
+//     "relativePath",
+//     "Path relative to KEYSTORE.root to store the wallets",
+//     undefined,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "password",
+//     "Password to decrypt the wallet",
+//     KEYSTORE.default.password,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicPhrase",
+//     "Mnemonic phrase to generate wallet from",
+//     undefined,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicPath",
+//     "Mnemonic path to generate wallet from",
+//     KEYSTORE.default.mnemonic.path,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicLocale",
+//     "Mnemonic locale to generate wallet from",
+//     KEYSTORE.default.mnemonic.locale,
+//     types.string
+//   )
+//   .setAction(async (args: ICallContract, hre) => {
+//     setGlobalHRE(hre);
+//     const artifact = JSON.parse(
+//       await fs.readFile(
+//         args.artifactPath ||
+//           `artifacts/contracts/${args.contractName}.sol/${args.contractName}.json`
+//       )
+//     );
+//     args.mnemonicPhrase =
+//       args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
+//     let wallet: Wallet | undefined;
+//     if (args.mnemonicPhrase) {
+//       wallet = await generateWallet(
+//         undefined,
+//         undefined,
+//         undefined,
+//         undefined,
+//         {
+//           phrase: args.mnemonicPhrase,
+//           path: args.mnemonicPath,
+//           locale: args.mnemonicLocale,
+//         } as Mnemonic,
+//         true
+//       );
+//     } else if (args.relativePath) {
+//       wallet = await decryptWallet(args.relativePath, args.password, true);
+//     }
+//     console.log(
+//       `Calling Smart Contract ${args.contractName}.${args.functionName}(${args.functionArgs}) at ${args.contractAddress}...`
+//     );
+//     console.log(
+//       "Result: ",
+//       await new Contract(
+//         args.contractAddress,
+//         artifact.abi,
+//         wallet || hre.ethers.provider
+//       ).callStatic[args.functionName](...args.functionArgs)
+//     );
+//   });
+
+// task(
+//   "get-logic",
+//   "Check what logic|implementation smart contract address is currently using a given proxy"
+// )
+//   .addPositionalParam("proxy", "address of the proxy|storage contract", undefined, types.string)
+//   .addOptionalParam("proxyAdmin", "Address of a deloyed Proxy Admin", undefined, types.string)
+//   .setAction(async (args: IGetLogic, hre: HardhatRuntimeEnvironment) => {
+//     setGlobalHRE(hre);
+
+//     const { logicFromProxy, adminFromProxy, logicFromAdmin, adminFromAdmin } = await getLogic(
+//       args.proxy,
+//       args.proxyAdmin,
+//       hre
+//     );
+
+//     console.log(`
+//           Logic contract information:
+//             - Logic (from Proxy's storage): ${logicFromProxy}
+//             - Admin (from Proxy's storage): ${adminFromProxy}
+//             - Logic (from Admin): ${logicFromAdmin}
+//             - Admin (from Admin): ${adminFromAdmin}
+//         `);
+//   });
+
+// task("change-logic", "change the actual logic|implementation smart contract of a TUP proxy")
+//   .addPositionalParam("proxy", "address of the proxy|storage contract", undefined, types.string)
+//   .addOptionalParam("proxyAdmin", "Address of a deloyed Proxy Admin", undefined, types.string)
+//   .addParam("newLogic", "Address of the new logic|implementation contract", undefined, types.string)
+//   .addOptionalParam(
+//     "relativePath",
+//     "Path relative to KEYSTORE.root to store the wallets",
+//     undefined,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "password",
+//     "Password to decrypt the wallet",
+//     KEYSTORE.default.password,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicPhrase",
+//     "Mnemonic phrase to generate wallet from",
+//     undefined,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicPath",
+//     "Mnemonic path to generate wallet from",
+//     KEYSTORE.default.mnemonic.path,
+//     types.string
+//   )
+//   .addOptionalParam(
+//     "mnemonicLocale",
+//     "Mnemonic locale to generate wallet from",
+//     KEYSTORE.default.mnemonic.locale,
+//     types.string
+//   )
+//   .setAction(async (args: IChangeLogic, hre: HardhatRuntimeEnvironment) => {
+//     setGlobalHRE(hre);
+
+//     args.mnemonicPhrase =
+//       args.mnemonicPhrase == "default" ? KEYSTORE.default.mnemonic.phrase : args.mnemonicPhrase;
+//     let wallet: Wallet | undefined;
+//     if (args.mnemonicPhrase) {
+//       wallet = await generateWallet(
+//         undefined,
+//         undefined,
+//         undefined,
+//         undefined,
+//         {
+//           phrase: args.mnemonicPhrase,
+//           path: `${args.mnemonicPath}/0`,
+//           locale: args.mnemonicLocale,
+//         } as Mnemonic,
+//         true
+//       );
+//     } else if (args.relativePath) {
+//       wallet = await decryptWallet(args.relativePath, args.password, true);
+//     } else {
+//       throw new Error("ERROR: signer required to perform this task");
+//     }
+
+//     const { previousLogic, actualLogic, receipt } = await changeLogic(
+//       args.proxy,
+//       args.newLogic,
+//       wallet!,
+//       args.proxyAdmin
+//     );
+//     console.log(`
+//           Logic changed successfully:
+//             - Previous Logic: ${previousLogic}
+//             - Actual Logic: ${actualLogic}
+//             - Transaction: ${receipt.transactionHash}
+//             - Block: ${receipt.blockHash}
+//         `);
+//   });
 
 // OTHER
 task("get-timestamp", "get the current timestamp in seconds")
@@ -552,30 +712,30 @@ task("get-timestamp", "get the current timestamp in seconds")
     console.log(Math.floor(Date.now() / 1000) + timeToAdd);
   });
 
-task("quick-test", "Random quick testing function")
-  .addOptionalParam(
-    "args",
-    "Contract initialize function's arguments if any",
-    undefined,
-    types.json
-  )
-  .setAction(async ({ args }, hre: HardhatRuntimeEnvironment) => {
-    setGlobalHRE(hre);
-    if (args) {
-      // example: npx hardhat quick-test --args '[12, "hello"]'
-      console.log("RAW Args: ", args, typeof args[0], args[0], typeof args[1], args[1]);
-    }
-    console.log("Latest block: ", await hre.ethers.provider.getBlockNumber());
-    console.log(
-      "First accounts: ",
-      await hre.ethers.provider.getSigner(0).getAddress(),
-      await hre.ethers.provider.getSigner(1).getAddress()
-    );
-    console.log(
-      "First account balance: ",
-      await hre.ethers.provider.getBalance(await hre.ethers.provider.getSigner(0).getAddress())
-    );
-  });
+// task("quick-test", "Random quick testing function")
+//   .addOptionalParam(
+//     "args",
+//     "Contract initialize function's arguments if any",
+//     undefined,
+//     types.json
+//   )
+//   .setAction(async ({ args }, hre: HardhatRuntimeEnvironment) => {
+//     setGlobalHRE(hre);
+//     if (args) {
+//       // example: npx hardhat quick-test --args '[12, "hello"]'
+//       console.log("RAW Args: ", args, typeof args[0], args[0], typeof args[1], args[1]);
+//     }
+//     console.log("Latest block: ", await hre.ethers.provider.getBlockNumber());
+//     console.log(
+//       "First accounts: ",
+//       await hre.ethers.provider.getSigner(0).getAddress(),
+//       await hre.ethers.provider.getSigner(1).getAddress()
+//     );
+//     console.log(
+//       "First account balance: ",
+//       await hre.ethers.provider.getBalance(await hre.ethers.provider.getSigner(0).getAddress())
+//     );
+//   });
 
 //* Config
 // You need to export an object to set up your config
@@ -586,6 +746,7 @@ const config: HardhatUserConfig = {
     settings: {
       optimizer: {
         enabled: true,
+        runs: 10,
       },
       evmVersion: BLOCKCHAIN.default.evm,
     },
@@ -633,9 +794,16 @@ const config: HardhatUserConfig = {
   typechain: {
     target: "ethers-v5",
     externalArtifacts: [
-      //! NOT WORKING: export extrange error
+      // OpenZeppelin
       "node_modules/@openzeppelin/contracts/build/contracts/ProxyAdmin.json",
       "node_modules/@openzeppelin/contracts/build/contracts/TransparentUpgradeableProxy.json",
+      // Standard Contract Registry
+      "node_modules/standard-contract-registry/artifacts/contracts/ContractRegistry.sol/ContractRegistry.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractRegistry.sol/IContractRegistry.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/ContractDeployer.sol/ContractDeployer.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractDeployer.sol/IContractDeployer.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/UpgradeableDeployer.sol/UpgradeableDeployer.json",
+      "node_modules/standard-contract-registry/artifacts/contracts/interfaces/IUpgradeableDeployer.sol/IUpgradeableDeployer.json",
     ],
   },
 };

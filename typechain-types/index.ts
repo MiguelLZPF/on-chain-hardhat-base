@@ -16,3 +16,15 @@ export type { ProxyAdmin } from "./node_modules/@openzeppelin/contracts/build/co
 export { ProxyAdmin__factory } from "./factories/node_modules/@openzeppelin/contracts/build/contracts/ProxyAdmin__factory";
 export type { TransparentUpgradeableProxy } from "./node_modules/@openzeppelin/contracts/build/contracts/TransparentUpgradeableProxy";
 export { TransparentUpgradeableProxy__factory } from "./factories/node_modules/@openzeppelin/contracts/build/contracts/TransparentUpgradeableProxy__factory";
+export type { ContractRegistry } from "./node_modules/standard-contract-registry/artifacts/contracts/ContractRegistry";
+export { ContractRegistry__factory } from "./factories/node_modules/standard-contract-registry/artifacts/contracts/ContractRegistry__factory";
+export type { IContractRegistry } from "./node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractRegistry";
+export { IContractRegistry__factory } from "./factories/node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractRegistry__factory";
+export type { ContractDeployer } from "./node_modules/standard-contract-registry/artifacts/contracts/ContractDeployer";
+export { ContractDeployer__factory } from "./factories/node_modules/standard-contract-registry/artifacts/contracts/ContractDeployer__factory";
+export type { IContractDeployer } from "./node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractDeployer";
+export { IContractDeployer__factory } from "./factories/node_modules/standard-contract-registry/artifacts/contracts/interfaces/IContractDeployer__factory";
+export type { UpgradeableDeployer } from "./node_modules/standard-contract-registry/artifacts/contracts/UpgradeableDeployer";
+export { UpgradeableDeployer__factory } from "./factories/node_modules/standard-contract-registry/artifacts/contracts/UpgradeableDeployer__factory";
+export type { IUpgradeableDeployer } from "./node_modules/standard-contract-registry/artifacts/contracts/interfaces/IUpgradeableDeployer";
+export { IUpgradeableDeployer__factory } from "./factories/node_modules/standard-contract-registry/artifacts/contracts/interfaces/IUpgradeableDeployer__factory";
