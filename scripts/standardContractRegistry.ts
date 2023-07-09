@@ -1,201 +1,135 @@
-import { CONTRACT, DEPLOY, GAS_OPT } from "configuration";
-import { ghre } from "scripts/utils";
-import * as fs from "async-file";
+import { CONTRACTS, DEPLOY, GAS_OPT } from "configuration";
+import { gProvider, ghre } from "scripts/utils";
 import { Signer, ContractFactory, Contract } from "ethers";
-import { isAddress, keccak256, formatBytes32String, parseBytes32String, BytesLike } from "ethers/lib/utils";
+import {
+  isAddress,
+  keccak256,
+  formatBytes32String,
+  parseBytes32String,
+  BytesLike,
+} from "ethers/lib/utils";
 import { TransactionReceipt, JsonRpcProvider, Provider } from "@ethersproject/providers";
 import yesno from "yesno";
 import { IRegularDeployment } from "models/Deploy";
-// Artifacts
-import * as CODE_TRUST_ARTIFACT from "node_modules/decentralized-code-trust/artifacts/contracts/CodeTrust.sol/CodeTrust.json";
-import * as CONTRACT_REGISTRY_ARTIFACT from "node_modules/standard-contract-registry/artifacts/contracts/ContractRegistry.sol/ContractRegistry.json";
-import * as CONTRACT_DEPLOYER_ARTIFACT from "node_modules/standard-contract-registry/artifacts/contracts/ContractDeployer.sol/ContractDeployer.json";
-import { CodeTrust__factory } from "node_modules/decentralized-code-trust/typechain-types";
-import { ContractRecordStructOutput } from "node_modules/standard-contract-registry/typechain-types/artifacts/contracts/ContractRegistry";
-import {
-  ContractDeployer__factory,
-  ContractRegistry__factory,
-  IContractDeployer,
-  IContractRegistry,
-} from "typechain-types";
 import { IDecodedRecord } from "models/StandardContractRegistry";
-
-const NAME_HEXSTRING_ZERO = formatBytes32String("");
-// Deploy contract code
-const CODE_TRUST_DEP_CODE_HASH = keccak256(CODE_TRUST_ARTIFACT.deployedBytecode);
-const REGISTRY_DEP_CODE_HASH = keccak256(CONTRACT_REGISTRY_ARTIFACT.deployedBytecode);
-const DEPLOYER_DEP_CODE_HASH = keccak256(CONTRACT_DEPLOYER_ARTIFACT.deployedBytecode);
-
-export const deployCodeTrust = async (deployer: Signer) => {
-  const provider = deployer.provider || ghre.ethers.provider;
-  if (CONTRACT.codeTrust.address) {
-    const yes = await yesno({
-      question: `Contract ${CONTRACT.codeTrust.name} has an address set to ${CONTRACT.codeTrust.address}. Continue to deploy new CodeTrust?`,
-    });
-    if (!yes) {
-      throw new Error("Deployment aborted");
-    }
-  }
-  const codeTrustFactory = new ContractFactory(
-    CODE_TRUST_ARTIFACT.abi,
-    CODE_TRUST_ARTIFACT.bytecode,
-    deployer
-  ) as CodeTrust__factory;
-  const codeTrust = await codeTrustFactory.deploy(GAS_OPT.max);
-  const receipt = await codeTrust.deployTransaction.wait();
-  if (!isAddress(codeTrust.address)) {
-    throw new Error(`Contract instance address is invalid: ${codeTrust.address}`);
-  }
-  if (!isAddress(receipt.contractAddress)) {
-    throw new Error(`Contract receipt address is invalid: ${receipt.contractAddress}`);
-  }
-  if (codeTrust.address != receipt.contractAddress) {
-    throw new Error(
-      `Contract addresses does not match: ${codeTrust.address}, ${receipt.contractAddress}`
-    );
-  }
-  return {
-    contractName: CONTRACT.codeTrust.name,
-    address: codeTrust.address,
-    deployTxHash: receipt.transactionHash,
-    deployTimestamp: (await provider.getBlock(receipt.blockHash)).timestamp,
-    byteCodeHash: keccak256(CODE_TRUST_ARTIFACT.deployedBytecode),
-  } as IRegularDeployment;
-};
+import { deployCodeTrust } from "./decentralizedCodeTrust";
+import { CodeTrust } from "node_modules/decentralized-code-trust/typechain-types";
+import {
+  ContractRegistry,
+  ContractDeployer,
+  IContractRegistry,
+} from "node_modules/standard-contract-registry/typechain-types";
+import { deploy } from "scripts/deploy";
+import { writeFileSync } from "fs";
 
 export const initialize = async (
-  codeTrustAddr: string,
-  deployContractDeployer: boolean = true,
   systemSigner: Signer,
+  deployContractDeployer: boolean = true,
+  existingCodeTrust?: string,
   existingContractRegistry?: string,
   existingContractDeployer?: string
 ) => {
-  const provider = systemSigner.provider || ghre.ethers.provider;
-  // Factories needed to deploy
-  const contractRegistryFactory = new ContractFactory(
-    CONTRACT_REGISTRY_ARTIFACT.abi,
-    CONTRACT_REGISTRY_ARTIFACT.bytecode,
-    systemSigner
-  ) as ContractRegistry__factory;
-  const contractDeployerFactory = new ContractFactory(
-    CONTRACT_DEPLOYER_ARTIFACT.abi,
-    CONTRACT_DEPLOYER_ARTIFACT.bytecode,
-    systemSigner
-  ) as ContractDeployer__factory;
-  // Contracts
-  // -- needed for later
-  const codeTrust = new Contract(codeTrustAddr, CODE_TRUST_ARTIFACT.abi, systemSigner);
-  let contractRegistry: IContractRegistry;
-  let contractDeployer: IContractDeployer | undefined;
-  let registryReceipt, codeTrustReceipt: TransactionReceipt;
-  let deployerReceipt: TransactionReceipt | undefined;
-  // Deploy ContractRegistry
-  if (existingContractRegistry) {
-    // only create the contract registry instance
+  let provider = systemSigner.provider ? systemSigner.provider : gProvider;
+  let codeTrust: CodeTrust;
+  if (existingCodeTrust && isAddress(existingCodeTrust)) {
+    codeTrust = new Contract(
+      existingCodeTrust,
+      CONTRACTS.get("CodeTrust")!.artifact,
+      systemSigner
+    ) as CodeTrust;
+  } else {
+    const result = await deployCodeTrust(systemSigner);
+    codeTrust = result.contractInstance;
+  }
+  let contractRegistry: ContractRegistry;
+  if (existingContractRegistry && isAddress(existingContractRegistry)) {
     contractRegistry = new Contract(
       existingContractRegistry,
-      CONTRACT_REGISTRY_ARTIFACT.abi,
+      CONTRACTS.get("ContractRegistry")!.artifact,
       systemSigner
-    ) as IContractRegistry;
+    ) as ContractRegistry;
   } else {
-    // deploy
-    contractRegistry = await (
-      await contractRegistryFactory.deploy(
-        codeTrustAddr,
-        NAME_HEXSTRING_ZERO,
-        await versionDotToNum("01.00"),
-        keccak256(REGISTRY_DEP_CODE_HASH),
-        GAS_OPT.max
-      )
-    ).deployed();
+    const result = await deploy(
+      "ContractRegistry",
+      systemSigner,
+      [codeTrust.address],
+      undefined,
+      undefined,
+      false
+    );
+    contractRegistry = result.contractInstance as ContractRegistry;
   }
-  // Deploy ContractDeployer
-  if (existingContractDeployer) {
-    // only create the contract deployer instance
-    contractDeployer = new Contract(
-      existingContractDeployer,
-      CONTRACT_DEPLOYER_ARTIFACT.abi,
-      systemSigner
-    ) as IContractDeployer;
-  } else if (deployContractDeployer) {
-    // deploy
-    contractDeployer = await (
-      await contractDeployerFactory.deploy(contractRegistry.address, GAS_OPT.max)
-    ).deployed();
-  }
-  // codeTrustReceipt = await codeTrust.deployTransaction.wait();
-  registryReceipt = await contractRegistry.deployTransaction.wait();
-  deployerReceipt = contractDeployer ? await contractDeployer.deployTransaction.wait() : undefined;
-  // Get all blocks
-  // const codeTrustBlock = provider.getBlock(codeTrustReceipt.blockHash);
-  // const registryBlock = provider.getBlock(registryReceipt.blockHash);
-  // const deployerBlock = deployerReceipt ? provider.getBlock(deployerReceipt.blockHash) : undefined;
-  // Get deployed code for each contract
-  const codeTrustDepCode = provider.getCode(codeTrust.address);
-  const registryDepCode = provider.getCode(contractRegistry.address);
-  const deployerDepCode = contractDeployer ? provider.getCode(contractDeployer.address) : undefined;
-  // Get hash of the deployed code
-  const codeTrustDepCodeHash = keccak256(await codeTrustDepCode);
-  const registryDepCodeHash = keccak256(await registryDepCode);
-  const deployerDepCodeHash = deployerDepCode ? keccak256(await deployerDepCode) : undefined;
-  // Check that is the same code
-  // console.log(codeTrustDepCodeHash, CODE_TRUST_DEP_CODE_HASH);
-  // console.log(registryDepCodeHash, REGISTRY_DEP_CODE_HASH);
-  // console.log(deployerDepCodeHash, DEPLOYER_DEP_CODE_HASH);
-  if (codeTrustDepCodeHash != CODE_TRUST_DEP_CODE_HASH) {
-    console.warn(`WARNING: deployed code hash mismatch ${CONTRACT.codeTrust.name}`);
-  }
-  if (registryDepCodeHash != REGISTRY_DEP_CODE_HASH) {
-    console.warn(`WARNING: deployed code hash mismatch ${CONTRACT.contractRegistry.name}`);
-  }
-  if (deployerDepCodeHash && deployerDepCodeHash != DEPLOYER_DEP_CODE_HASH) {
-    console.warn(`WARNING: deployed code hash mismatch ${CONTRACT.contractDeployer.name}`);
+  let contractDeployer: ContractDeployer | undefined;
+  if (deployContractDeployer) {
+    if (existingContractDeployer && isAddress(existingContractDeployer)) {
+      contractDeployer = new Contract(
+        existingContractDeployer,
+        CONTRACTS.get("ContractDeployer")!.artifact,
+        systemSigner
+      ) as ContractDeployer;
+    } else {
+      const result = await deploy(
+        "ContractDeployer",
+        systemSigner,
+        [contractRegistry.address],
+        undefined,
+        undefined,
+        false
+      );
+      contractDeployer = result.contractInstance as ContractDeployer;
+    }
   }
   // Register the contracts
-  const registryRecord = getRecord(
-    CONTRACT.contractRegistry.name,
-    await systemSigner.getAddress(),
-    undefined,
-    contractRegistry
-  );
   const codeTrustRecord = await register(
-    CONTRACT.codeTrust.name,
+    CONTRACTS.get("CodeTrust")!.name,
     codeTrust.address,
     codeTrust.address,
     "01.00",
-    codeTrustDepCodeHash,
+    keccak256(await gProvider.getCode(codeTrust.address)),
     systemSigner,
     contractRegistry
   );
+  const registryRecord = await register(
+    CONTRACTS.get("ContractRegistry")!.name,
+    contractRegistry.address,
+    contractRegistry.address,
+    "01.00",
+    keccak256(await gProvider.getCode(contractRegistry.address)),
+    systemSigner,
+    contractRegistry
+  );
+
   const deployerRecord = contractDeployer
     ? await register(
-        CONTRACT.contractDeployer.name,
+        CONTRACTS.get("ContractDeployer")!.name,
         contractDeployer.address,
         contractDeployer.address,
         "01.00",
-        deployerDepCodeHash!,
+        keccak256(await gProvider.getCode(contractDeployer.address)),
         systemSigner,
         contractRegistry
       )
     : undefined;
-    // Check deployments and registrations
+  // Check deployments and registrations
   if (!codeTrustRecord || !codeTrustRecord.name) {
-    throw new Error(`ERROR: bad ${CONTRACT.codeTrust.name} record`);
+    throw new Error(`ERROR: bad ${CONTRACTS.get("CodeTrust")!.name} record`);
   }
-  if (!(await registryRecord) || !(await registryRecord).name) {
-    throw new Error(`ERROR: bad ${CONTRACT.contractRegistry.name} record`);
+  if (!registryRecord || !registryRecord.name) {
+    throw new Error(`ERROR: bad ${CONTRACTS.get("ContractRegistry")!.name} record`);
   }
   if (contractDeployer && (!deployerRecord || !deployerRecord!.name)) {
-    throw new Error(`ERROR: bad ${CONTRACT.contractDeployer.name} record`);
+    throw new Error(`ERROR: bad ${CONTRACTS.get("ContractDeployer")!.name} record`);
   }
-  
+
   // Save ContractRegistry deploy information
   const objectToSave = {
-    codeTrust: codeTrustRecord,
-    contractRegistry: await registryRecord,
-    contractDeployer: deployerRecord,
+    codeTrust: Object.fromEntries(Object.entries(codeTrustRecord)),
+    contractRegistry: Object.fromEntries(Object.entries(registryRecord)),
+    contractDeployer: deployerRecord
+      ? Object.fromEntries(Object.entries(deployerRecord))
+      : undefined,
   };
-  await fs.writeFile(DEPLOY.deploymentsPath, JSON.stringify(objectToSave));
+  writeFileSync(DEPLOY.deploymentsPath, JSON.stringify(objectToSave));
   return objectToSave;
 };
 
@@ -252,7 +186,7 @@ const getRecord = async (
       `ERROR: contract ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${admin}`
     );
   }
-  return {...result.record};
+  return { ...result.record };
 };
 
 const decodedRecord = async (record: ContractRecordStructOutput) => {
@@ -264,9 +198,9 @@ const decodedRecord = async (record: ContractRecordStructOutput) => {
     version: await versionNumToDot(record.version),
     logicCodeHash: record.logicCodeHash,
     extraData: record.extraData || record.extraData != "0x" ? record.extraData : undefined,
-    timestamp: new Date(record.timestamp.mul(1000).toNumber())
+    timestamp: new Date(record.timestamp.mul(1000).toNumber()),
   } as IDecodedRecord;
-}
+};
 
 // UTILITY FUNCTIONS
 

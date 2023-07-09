@@ -1,7 +1,6 @@
 import {
   ContractName,
   CONTRACT_NAMES,
-  CONTRACT_OZ_NAMES,
   Hardfork,
   IContract,
   INetwork,
@@ -39,7 +38,7 @@ export const KEYSTORE = {
  */
 export const BLOCKCHAIN = {
   default: {
-    solVersion: "0.8.19",
+    solVersion: "0.8.20",
     evm: "london" as Hardfork,
     gasLimit: 800000,
     gasPrice: 0,
@@ -104,39 +103,15 @@ export const GAS_OPT = {
 };
 
 export const DEPLOY = {
-  deploymentsPath: "deployments.json",
+  deploymentsPath: "registry-deployment.json",
 };
 
 export const CONTRACTS = new Map<ContractName, IContract>([
   [
-    CONTRACT_OZ_NAMES[0],
-    {
-      name: CONTRACT_OZ_NAMES[0],
-      artifact: `node_modules/@openzeppelin/contracts/build/contracts/${CONTRACT_OZ_NAMES[0]}.json`,
-      address: new Map([
-        ["hardhat", ""],
-        ["ganache", ""],
-        ["mainTest", ""],
-      ]),
-    },
-  ],
-  [
-    CONTRACT_OZ_NAMES[1],
-    {
-      name: CONTRACT_OZ_NAMES[1],
-      artifact: `node_modules/@openzeppelin/contracts/build/contracts/${CONTRACT_OZ_NAMES[1]}.json`,
-      address: new Map([
-        ["hardhat", ""],
-        ["ganache", ""],
-        ["mainTest", ""],
-      ]),
-    },
-  ],
-  [
     CONTRACT_NAMES[0],
     {
       name: CONTRACT_NAMES[0],
-      artifact: `artifacts/contracts/${CONTRACT_NAMES[0]}.sol/${CONTRACT_NAMES[0]}.json`,
+      artifact: `node_modules/@openzeppelin/contracts/build/contracts/${CONTRACT_NAMES[0]}.json`,
       address: new Map([
         ["hardhat", ""],
         ["ganache", ""],
@@ -148,7 +123,91 @@ export const CONTRACTS = new Map<ContractName, IContract>([
     CONTRACT_NAMES[1],
     {
       name: CONTRACT_NAMES[1],
-      artifact: `artifacts/contracts/${CONTRACT_NAMES[1]}.sol/${CONTRACT_NAMES[1]}.json`,
+      artifact: `node_modules/@openzeppelin/contracts/build/contracts/${CONTRACT_NAMES[1]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[2],
+    {
+      name: CONTRACT_NAMES[2],
+      artifact: `node_modules/decentralized-code-trust/artifacts/contracts/${CONTRACT_NAMES[2]}.sol/${CONTRACT_NAMES[2]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[3],
+    {
+      name: CONTRACT_NAMES[3],
+      artifact: `node_modules/decentralized-code-trust/artifacts/contracts/${CONTRACT_NAMES[3]}.sol/${CONTRACT_NAMES[3]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[4],
+    {
+      name: CONTRACT_NAMES[4],
+      artifact: `node_modules/standard-contract-registry/artifacts/contracts/${CONTRACT_NAMES[4]}.sol/${CONTRACT_NAMES[4]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[5],
+    {
+      name: CONTRACT_NAMES[5],
+      artifact: `node_modules/standard-contract-registry/artifacts/contracts/${CONTRACT_NAMES[5]}.sol/${CONTRACT_NAMES[5]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[6],
+    {
+      name: CONTRACT_NAMES[6],
+      artifact: `node_modules/standard-contract-registry/artifacts/contracts/${CONTRACT_NAMES[6]}.sol/${CONTRACT_NAMES[6]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[7],
+    {
+      name: CONTRACT_NAMES[7],
+      artifact: `artifacts/contracts/${CONTRACT_NAMES[7]}.sol/${CONTRACT_NAMES[7]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[8],
+    {
+      name: CONTRACT_NAMES[8],
+      artifact: `artifacts/contracts/${CONTRACT_NAMES[8]}.sol/${CONTRACT_NAMES[8]}.json`,
       address: new Map([
         ["hardhat", ""],
         ["ganache", ""],
