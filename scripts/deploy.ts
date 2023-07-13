@@ -1,5 +1,12 @@
 import { BLOCKCHAIN, CONTRACTS, DEPLOY, GAS_OPT } from "configuration";
-import { chainIdToNetwork, getContractInstance, ghre, gNetwork, gProvider } from "scripts/utils";
+import {
+  chainIdToNetwork,
+  getArtifact,
+  getContractInstance,
+  ghre,
+  gNetwork,
+  gProvider,
+} from "scripts/utils";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 import { Contract, ContractReceipt, Signer, PayableOverrides, ContractFactory } from "ethers";
 import { isAddress, keccak256 } from "ethers/lib/utils";
@@ -40,7 +47,7 @@ export const deploy = async (
   // check if deployer is connected to the provider
   deployer = deployer.provider ? deployer : deployer.connect(gProvider);
   // get the artifact of the contract name
-  const artifact = JSON.parse(readFileSync(CONTRACTS.get(contractName)!.artifact, "utf-8"));
+  const artifact = await getArtifact(contractName);
   // create factory instance and deploy
   const factory = new ContractFactory(artifact.abi, artifact.bytecode, deployer);
   // actual deployment

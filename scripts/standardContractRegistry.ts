@@ -1,6 +1,6 @@
 import { CONTRACTS, DEPLOY, GAS_OPT } from "configuration";
-import { gProvider, ghre } from "scripts/utils";
-import { Signer, ContractFactory, Contract } from "ethers";
+import { gNetwork, gProvider, getArtifact, ghre } from "scripts/utils";
+import { Signer, Contract } from "ethers";
 import {
   isAddress,
   keccak256,
@@ -8,9 +8,7 @@ import {
   parseBytes32String,
   BytesLike,
 } from "ethers/lib/utils";
-import { TransactionReceipt, JsonRpcProvider, Provider } from "@ethersproject/providers";
-import yesno from "yesno";
-import { IRegularDeployment } from "models/Deploy";
+import { JsonRpcProvider, Provider } from "@ethersproject/providers";
 import { IDecodedRecord } from "models/StandardContractRegistry";
 import { deployCodeTrust } from "./decentralizedCodeTrust";
 import { CodeTrust } from "node_modules/decentralized-code-trust/typechain-types";
@@ -20,7 +18,9 @@ import {
   IContractRegistry,
 } from "node_modules/standard-contract-registry/typechain-types";
 import { deploy } from "scripts/deploy";
-import { writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { ContractName } from "models/Configuration";
+import { ContractRecordStructOutput } from "standard-contract-registry/typechain-types/artifacts/contracts/interfaces/IContractRegistry";
 
 export const initialize = async (
   systemSigner: Signer,
@@ -81,32 +81,35 @@ export const initialize = async (
   }
   // Register the contracts
   const codeTrustRecord = await register(
-    CONTRACTS.get("CodeTrust")!.name,
-    codeTrust.address,
-    codeTrust.address,
     "01.00",
-    keccak256(await gProvider.getCode(codeTrust.address)),
     systemSigner,
+    "CodeTrust",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
     contractRegistry
   );
   const registryRecord = await register(
-    CONTRACTS.get("ContractRegistry")!.name,
-    contractRegistry.address,
-    contractRegistry.address,
     "01.00",
-    keccak256(await gProvider.getCode(contractRegistry.address)),
     systemSigner,
+    "ContractRegistry",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
     contractRegistry
   );
 
   const deployerRecord = contractDeployer
     ? await register(
-        CONTRACTS.get("ContractDeployer")!.name,
-        contractDeployer.address,
-        contractDeployer.address,
         "01.00",
-        keccak256(await gProvider.getCode(contractDeployer.address)),
         systemSigner,
+        "ContractDeployer",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
         contractRegistry
       )
     : undefined;
@@ -133,22 +136,29 @@ export const initialize = async (
   return objectToSave;
 };
 
-const registerByName = async (contractName: any /*TODO*/) => {};
-
 const register = async (
-  recordName: string,
-  proxy: string,
-  logic: string,
   version: string,
-  logicCodeHash: BytesLike,
   admin: Signer,
+  contractName?: ContractName,
+  recordName: string = CONTRACTS.get(contractName!)!.name,
+  proxy: string = CONTRACTS.get(contractName!)!.address.get(gNetwork.name!)!,
+  logic: string = CONTRACTS.get(contractName!)!.address.get(gNetwork.name!)!,
+  logicCodeHash?: BytesLike,
   contractRegistry?: string | IContractRegistry
 ) => {
-  const provider = admin.provider || ghre.ethers.provider;
+  // check if admin is connected
+  admin = admin.provider ? admin : admin.connect(gProvider);
   const adminAddr = admin.getAddress();
   contractRegistry = await createRegistryInstance(contractRegistry, admin);
   const nameBytes = formatBytes32String(recordName);
   const versionNumber = await versionDotToNum(version);
+  // Calculate the logicCodeHash if not given
+  if (!logicCodeHash && !contractName) {
+    throw new Error(`No logicCodeHash provided and no recordName to calculate it`);
+  }
+  logicCodeHash = logicCodeHash
+    ? logicCodeHash
+    : keccak256((await getArtifact(contractName)).deployedBytecode);
 
   const receipt = await (
     await contractRegistry.register(
@@ -208,11 +218,12 @@ const createRegistryInstance = async (
   registry?: IContractRegistry | string,
   signerOrProvider: Signer | Provider | JsonRpcProvider = ghre.ethers.provider
 ) => {
+  const contractRegistryArtifact = getArtifact("ContractRegistry");
   if (registry && typeof registry == "string") {
     // we have the registry address
     registry = new Contract(
       registry,
-      CONTRACT_REGISTRY_ARTIFACT.abi,
+      (await contractRegistryArtifact).abi,
       signerOrProvider
     ) as IContractRegistry;
   } else if (registry) {
@@ -220,16 +231,16 @@ const createRegistryInstance = async (
     registry = (registry as IContractRegistry).connect(signerOrProvider);
   } else {
     // no registry, use the deployment file
-    if (!(await fs.exists(DEPLOY.deploymentsPath))) {
+    if (!existsSync(DEPLOY.deploymentsPath)) {
       throw new Error(
         `No ContractRegistry deployment file found. An initialization step is needed.`
       );
     }
-    const registryDeployment = JSON.parse(await fs.readFile(DEPLOY.deploymentsPath));
+    const registryDeployment = JSON.parse(readFileSync(DEPLOY.deploymentsPath, "utf-8"));
 
     registry = new Contract(
       registryDeployment.contractRegistry.proxy,
-      CONTRACT_REGISTRY_ARTIFACT.abi,
+      (await contractRegistryArtifact).abi,
       signerOrProvider
     ) as IContractRegistry;
   }

@@ -1,6 +1,6 @@
 import { BLOCKCHAIN, CONTRACTS } from "configuration";
 import { ContractName, INetwork, NetworkName } from "models/Configuration";
-import { HardhatRuntimeEnvironment } from "hardhat/types";
+import { Artifact, HardhatRuntimeEnvironment } from "hardhat/types";
 import { Contract, constants, Signer, ContractFactory } from "ethers";
 import { BlockTag, JsonRpcProvider } from "@ethersproject/providers";
 import { existsSync, mkdirSync, readFileSync } from "fs";
@@ -37,6 +37,14 @@ export const chainIdToNetwork = new Map<number | undefined, NetworkName>([
   [BLOCKCHAIN.networks.get("ganache")!.chainId, "ganache"],
   [BLOCKCHAIN.networks.get("mainTest")!.chainId, "mainTest"],
 ]);
+
+export const getArtifact = async (
+  contractName?: ContractName,
+  path?: string
+): Promise<Artifact> => {
+  path = path ? path : CONTRACTS.get(contractName!)!.artifact;
+  return JSON.parse(readFileSync(path, "utf-8")) as Artifact;
+};
 
 /**
  * Create a new instance of a deployed contract
