@@ -6,10 +6,11 @@ import { ContractReceipt, Wallet } from "ethers";
 import { TransactionReceipt, Block, JsonRpcProvider } from "@ethersproject/providers";
 import { Mnemonic, isAddress, parseEther } from "ethers/lib/utils";
 import { generateWallets } from "scripts/wallets";
-import { IStorage, Ownable } from "typechain-types";
 import { ADDR_ZERO, getContractInstance, setGlobalHRE } from "scripts/utils";
 import { INetwork } from "models/Configuration";
 import { deploy } from "scripts/deploy";
+import { IStorage } from "typechain-types/artifacts/contracts/interfaces";
+import { Ownable } from "typechain-types/artifacts/@openzeppelin/contracts/access";
 
 // Specific Constants
 const CONTRACT_NAME = "Storage";
@@ -54,7 +55,7 @@ describe("Storage", () => {
   describe("Deployment and Initialization", () => {
     if (STORAGE_DEPLOYED_AT) {
       step("Should create contract instance", async () => {
-        storage = (await getContractInstance(CONTRACT_NAME, admin)) as IStorage & Ownable;
+        storage = await getContractInstance<IStorage & Ownable>(CONTRACT_NAME, admin);
         expect(isAddress(storage.address)).to.be.true;
         expect(storage.address).to.equal(STORAGE_DEPLOYED_AT);
         console.log(`${CONTRACT_NAME} recovered at: ${storage.address}`);

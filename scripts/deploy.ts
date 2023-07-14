@@ -24,9 +24,7 @@ import { ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { ContractName } from "models/Configuration";
 
-const PROXY_ADMIN_ARTIFACT = JSON.parse(
-  readFileSync(CONTRACTS.get("ProxyAdmin")!.artifact, "utf-8")
-);
+const PROXY_ADMIN_ARTIFACT = getArtifact("ProxyAdmin");
 const PROXY_ADMIN_CODEHASH = keccak256(PROXY_ADMIN_ARTIFACT.deployedBytecode);
 
 /**
@@ -99,18 +97,18 @@ export const deployUpgradeable = async (
   // save or update Proxy Admin in deployments
   let adminDeployment: Promise<IRegularDeployment | undefined> | IRegularDeployment | undefined;
   if (proxyAdmin && typeof proxyAdmin == "string" && isAddress(proxyAdmin)) {
-    proxyAdmin = (await getContractInstance("ProxyAdmin", deployer, proxyAdmin)) as ProxyAdmin;
+    proxyAdmin = await getContractInstance<ProxyAdmin>("ProxyAdmin", deployer, proxyAdmin);
   } else if (proxyAdmin && typeof proxyAdmin == "string") {
     throw new Error("String provided as Proxy Admin's address is not an address");
   } else if (!proxyAdmin) {
     const firstDeployedAdmin = await getProxyAdminDeployment();
     if (firstDeployedAdmin && firstDeployedAdmin.address) {
       // use the first existant proxy admin deployment
-      proxyAdmin = (await getContractInstance(
+      proxyAdmin = await getContractInstance<ProxyAdmin>(
         "ProxyAdmin",
         deployer,
         firstDeployedAdmin.address
-      )) as ProxyAdmin;
+      );
     } else {
       // deploy new Proxy Admin
       const ok = await yesno({
@@ -243,7 +241,7 @@ export const upgrade = async (
   //* Proxy Admin
   if (proxyAdmin && typeof proxyAdmin == "string" && isAddress(proxyAdmin)) {
     // use given address as ProxyAdmin
-    proxyAdmin = (await getContractInstance("ProxyAdmin", deployer, proxyAdmin)) as ProxyAdmin;
+    proxyAdmin = await getContractInstance<ProxyAdmin>("ProxyAdmin", deployer, proxyAdmin);
   } else if (proxyAdmin && typeof proxyAdmin == "string" /*  && !isAddress(proxyAdmin) */) {
     // given a proxy admin but is not an address nor a ProxyAdmin
     throw new Error("String provided as Proxy Admin's address is not an address");
@@ -255,13 +253,13 @@ export const upgrade = async (
     if (!(await contractDeployment).admin) {
       throw new Error(`ERROR: No proxy deployment found for proxy address: ${proxy}`);
     }
-    proxyAdmin = (await getContractInstance(
+    proxyAdmin = await getContractInstance<ProxyAdmin>(
       "ProxyAdmin",
       deployer,
       (
         await contractDeployment
       ).admin
-    )) as ProxyAdmin;
+    );
   }
   // check if proxy admin is a ProxyAdmin Contract
   try {
@@ -371,11 +369,11 @@ export const getLogic = async (
     throw new Error(`ERROR: ${proxy} NOT found in this network`);
   }
   // instanciate the ProxyAdmin
-  const proxyAdminContract = (await getContractInstance(
+  const proxyAdminContract = await getContractInstance<ProxyAdmin>(
     "ProxyAdmin",
     undefined,
     proxyAdmin
-  )) as ProxyAdmin;
+  );
 
   // check if proxy admin is a ProxyAdmin Contract
   try {
@@ -424,11 +422,11 @@ export const changeLogic = async (
     throw new Error(`ERROR: ${proxy} NOT found in this network`);
   }
   // instanciate the ProxyAdmin
-  const proxyAdminContract = (await getContractInstance(
+  const proxyAdminContract = await getContractInstance<ProxyAdmin>(
     "ProxyAdmin",
     signer,
     proxyAdmin
-  )) as ProxyAdmin;
+  );
 
   try {
     const proxyAdminCode = await signer.provider!.getCode(proxyAdmin);

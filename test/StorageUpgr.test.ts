@@ -6,10 +6,12 @@ import { ContractReceipt, Wallet } from "ethers";
 import { TransactionReceipt, Block, JsonRpcProvider } from "@ethersproject/providers";
 import { Mnemonic, isAddress, parseEther } from "ethers/lib/utils";
 import { generateWallets } from "scripts/wallets";
-import { IStorage, Ownable, ProxyAdmin } from "typechain-types";
 import { ADDR_ZERO, getContractInstance, setGlobalHRE } from "scripts/utils";
 import { INetwork } from "models/Configuration";
 import { deploy, deployUpgradeable } from "scripts/deploy";
+import { ProxyAdmin } from "typechain-types";
+import { IStorage } from "typechain-types/artifacts/contracts/interfaces";
+import { OwnableUpgradeable } from "typechain-types/artifacts/@openzeppelin/contracts-upgradeable/access";
 
 // Specific Constants
 const CONTRACT_NAME = "StorageUpgr";
@@ -28,7 +30,7 @@ let admin: Wallet;
 let defaultUser: Wallet;
 // -- contracts
 let proxyAdmin: ProxyAdmin;
-let storage: IStorage & Ownable;
+let storage: IStorage & OwnableUpgradeable;
 describe("Storage", () => {
   before("Generate test Accounts", async () => {
     ({ gProvider: provider, gNetwork: network } = await setGlobalHRE(HRE));
@@ -55,7 +57,7 @@ describe("Storage", () => {
   describe("Deployment and Initialization", () => {
     if (STORAGE_DEPLOYED_AT) {
       step("Should create contract instance", async () => {
-        storage = (await getContractInstance(CONTRACT_NAME, admin)) as IStorage & Ownable;
+        storage = await getContractInstance<IStorage & OwnableUpgradeable>(CONTRACT_NAME, admin);
         expect(isAddress(storage.address)).to.be.true;
         expect(storage.address).to.equal(STORAGE_DEPLOYED_AT);
         console.log(`${CONTRACT_NAME} recovered at: ${storage.address}`);
@@ -83,7 +85,7 @@ describe("Storage", () => {
           false
         );
         // get the upgradeable instance as IStorage
-        storage = deployResult.contractInstance as IStorage & Ownable;
+        storage = deployResult.contractInstance as IStorage & OwnableUpgradeable;
         expect(isAddress(storage.address)).to.be.true;
         expect(storage.address).not.to.equal(ADDR_ZERO);
         console.log(`NEW ${CONTRACT_NAME} deployed at: ${storage.address}`);

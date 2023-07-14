@@ -38,10 +38,7 @@ export const chainIdToNetwork = new Map<number | undefined, NetworkName>([
   [BLOCKCHAIN.networks.get("mainTest")!.chainId, "mainTest"],
 ]);
 
-export const getArtifact = async (
-  contractName?: ContractName,
-  path?: string
-): Promise<Artifact> => {
+export const getArtifact = (contractName?: ContractName, path?: string): Artifact => {
   path = path ? path : CONTRACTS.get(contractName!)!.artifact;
   return JSON.parse(readFileSync(path, "utf-8")) as Artifact;
 };
@@ -53,17 +50,17 @@ export const getArtifact = async (
  * @param contractAddr (optional) [Contracts.<contractName>.<network>.address] address of the deployed contract
  * @returns instance of the contract attached to contractAddr and connected to signer or provider
  */
-export const getContractInstance = async (
+export const getContractInstance = async <T>(
   contractName: ContractName,
   signer?: Signer,
   contractAddr?: string
-): Promise<Contract> => {
-  const artifact = JSON.parse(readFileSync(CONTRACTS.get(contractName)!.artifact, "utf-8"));
+): Promise<T> => {
+  const artifact = getArtifact(contractName);
   const factory = new ContractFactory(artifact.abi, artifact.bytecode, signer);
   const contract = factory.attach(
     contractAddr || CONTRACTS.get(contractName)!.address.get(gNetwork.name)!
   );
-  return signer ? contract : contract.connect(gProvider);
+  return signer ? (contract as T) : (contract.connect(gProvider) as T);
 };
 
 /**

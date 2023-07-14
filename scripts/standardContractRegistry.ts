@@ -223,7 +223,7 @@ const createRegistryInstance = async (
     // we have the registry address
     registry = new Contract(
       registry,
-      (await contractRegistryArtifact).abi,
+      contractRegistryArtifact.abi,
       signerOrProvider
     ) as IContractRegistry;
   } else if (registry) {
@@ -240,7 +240,7 @@ const createRegistryInstance = async (
 
     registry = new Contract(
       registryDeployment.contractRegistry.proxy,
-      (await contractRegistryArtifact).abi,
+      contractRegistryArtifact.abi,
       signerOrProvider
     ) as IContractRegistry;
   }

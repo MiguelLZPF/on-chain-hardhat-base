@@ -3,7 +3,7 @@ import "hardhat-contract-sizer";
 // import { ethers } from "hardhat"; //! Cannot be imported here or any file that is imported here because it is generated here
 import { subtask, task, types } from "hardhat/config";
 import { HardhatRuntimeEnvironment, HardhatUserConfig } from "hardhat/types";
-import { BigNumber, Wallet } from "ethers";
+import { BigNumber, Wallet, Contract } from "ethers";
 import { Mnemonic } from "ethers/lib/utils";
 import { BLOCKCHAIN, GAS_OPT, KEYSTORE } from "configuration";
 import { decryptWallet, generateWallet, generateWallets } from "scripts/wallets";
@@ -506,7 +506,11 @@ task("call-contract", "Call a contract function (this does not change contract s
       `Calling Smart Contract ${args.contractName}.${args.functionName}(${args.functionArgs}) at ${args.contractAddress}...`
     );
     const functionArgs = args.functionArgs ? JSON5.parse(args.functionArgs) : [];
-    const contract = await getContractInstance(args.contractName, wallet, args.contractAddress);
+    const contract = await getContractInstance<Contract>(
+      args.contractName,
+      wallet,
+      args.contractAddress
+    );
     console.log("Result: ", await contract.callStatic[args.functionName](...functionArgs));
   });
 
