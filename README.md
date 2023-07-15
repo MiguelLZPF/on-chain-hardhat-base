@@ -1,4 +1,4 @@
-# 1. Hardhat On-Chain Deplyments Base - HHonCDB
+# 1. Hardhat On-Chain Deployments Base - HHonCDB
 
 Before run anything, make sure you run `npm install`.
 
@@ -6,7 +6,7 @@ This project aims to provide an easy to use _Hardhat base project_ that can be u
 
 The structure follows a Hardhat project environment using **ethers**, **waffle** and **chai**. It also use **typescript** and generates smart contract types using **typechain**. The --network parameter refers to the network to be used defined in the [hardhat config file](./hardhat.config.ts).
 
-- [1. Hardhat On-Chain Deplyments Base - HHonCDB](#1-hardhat-on-chain-deplyments-base---hhoncdb)
+- [1. Hardhat On-Chain Deployments Base - HHonCDB](#1-hardhat-on-chain-deployments-base---hhoncdb)
   - [1.1. Custom Tasks added](#11-custom-tasks-added)
     - [AVAILABLE TASKS:](#available-tasks)
   - [1.2. Configuration file constants](#12-configuration-file-constants)

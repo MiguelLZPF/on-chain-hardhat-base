@@ -1,6 +1,6 @@
 {
   "name": "on-chainhardhat-base",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "This is a base hardhat project for development, testing and deployment of Smart Contracts. It adds scripts and hardhat tasks for On-Chain deployments.",
   "main": "index.js",
   "scripts": {
