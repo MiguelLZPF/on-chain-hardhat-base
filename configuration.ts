@@ -1,4 +1,11 @@
-type Hardfork = "london" | "berlin" | "byzantium";
+import {
+  ContractName,
+  CONTRACT_NAMES,
+  Hardfork,
+  IContract,
+  INetwork,
+  NetworkName,
+} from "models/Configuration";
 
 /**
  * The KEYSTORE environment constant group is used to agrupate the constants related to the Encryped JSON wallets
@@ -31,25 +38,58 @@ export const KEYSTORE = {
  */
 export const BLOCKCHAIN = {
   default: {
-    solVersion: "0.8.17",
+    solVersion: "0.8.20",
     evm: "london" as Hardfork,
-    gasLimit: 10000000,
+    gasLimit: 800000,
     gasPrice: 0,
     maxFeePerGas: 900000000,
     maxPriorityFeePerGas: 100,
     initialBaseFeePerGas: 7,
   },
-  hardhat: {
-    chainId: 31337,
-    hostname: "127.0.0.1",
-    port: 8545,
-  },
-  ganache: {
-    chainId: 1337,
-    hostname: "127.0.0.1",
-    port: 8545,
-    dbPath: ".ganache-db",
-  },
+  networks: new Map<NetworkName | undefined, INetwork>([
+    [
+      undefined,
+      {
+        chainId: 31337,
+        name: "hardhat",
+        protocol: "http",
+        hostname: "127.0.0.1",
+        port: 8545,
+      },
+    ],
+    [
+      "hardhat",
+      {
+        chainId: 31337,
+        name: "hardhat",
+        protocol: "http",
+        hostname: "localhost",
+        port: 8545,
+      },
+    ],
+    [
+      "ganache",
+      {
+        chainId: 1337,
+        name: "ganache",
+        protocol: "http",
+        hostname: "localhost",
+        port: 8545,
+        dbPath: ".ganache-db",
+      },
+    ],
+    [
+      "mainTest",
+      {
+        chainId: 1666,
+        name: "mainTest",
+        protocol: "http",
+        hostname: "192.168.12.207",
+        port: 8545,
+        dbPath: ".ganache-db",
+      },
+    ],
+  ]),
 };
 
 // default gas options to be used when sending Tx. It aims to zero gas price networks
@@ -66,33 +106,117 @@ export const DEPLOY = {
   deploymentsPath: "registry-deployment.json",
 };
 
-export const CONTRACT = {
-  // system contracts
-  codeTrust: {
-    name: "CodeTrust",
-    address: "", // if set can be used as default value for some methods
-  },
-  contractRegistry: {
-    name: "ContractRegistry",
-    address: "", // if set can be used as default value for some methods
-  },
-  contractDeployer: {
-    name: "ContractDeployer",
-    address: "", // if set can be used as default value for some methods
-  },
-  upgradeableDeployer: {
-    name: "UpgradeableDeployer",
-    address: "", // if set can be used as default value for some methods
-  },
-  // development contracts
-  lock: {
-    name: "Lock",
-  },
-  lockUpgradeable: {
-    name: "LockUpgr",
-  },
-};
+export const CONTRACTS = new Map<ContractName, IContract>([
+  [
+    CONTRACT_NAMES[0],
+    {
+      name: CONTRACT_NAMES[0],
+      artifact: `node_modules/@openzeppelin/contracts/build/contracts/${CONTRACT_NAMES[0]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[1],
+    {
+      name: CONTRACT_NAMES[1],
+      artifact: `node_modules/@openzeppelin/contracts/build/contracts/${CONTRACT_NAMES[1]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[2],
+    {
+      name: CONTRACT_NAMES[2],
+      artifact: `node_modules/decentralized-code-trust/artifacts/contracts/${CONTRACT_NAMES[2]}.sol/${CONTRACT_NAMES[2]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[3],
+    {
+      name: CONTRACT_NAMES[3],
+      artifact: `node_modules/decentralized-code-trust/artifacts/contracts/${CONTRACT_NAMES[3]}.sol/${CONTRACT_NAMES[3]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[4],
+    {
+      name: CONTRACT_NAMES[4],
+      artifact: `node_modules/standard-contract-registry/artifacts/contracts/${CONTRACT_NAMES[4]}.sol/${CONTRACT_NAMES[4]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[5],
+    {
+      name: CONTRACT_NAMES[5],
+      artifact: `node_modules/standard-contract-registry/artifacts/contracts/${CONTRACT_NAMES[5]}.sol/${CONTRACT_NAMES[5]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[6],
+    {
+      name: CONTRACT_NAMES[6],
+      artifact: `node_modules/standard-contract-registry/artifacts/contracts/${CONTRACT_NAMES[6]}.sol/${CONTRACT_NAMES[6]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[7],
+    {
+      name: CONTRACT_NAMES[7],
+      artifact: `artifacts/contracts/${CONTRACT_NAMES[7]}.sol/${CONTRACT_NAMES[7]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+  [
+    CONTRACT_NAMES[8],
+    {
+      name: CONTRACT_NAMES[8],
+      artifact: `artifacts/contracts/${CONTRACT_NAMES[8]}.sol/${CONTRACT_NAMES[8]}.json`,
+      address: new Map([
+        ["hardhat", ""],
+        ["ganache", ""],
+        ["mainTest", ""],
+      ]),
+    },
+  ],
+]);
 
 export const TEST = {
-  accountNumber: 10,
+  accountNumber: 2,
 };

@@ -7,10 +7,10 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true,
-    "baseUrl": "."
+    "baseUrl": "./"
   },
   "ts-node": {
-    // Do not forget to npm i -D tsconfig-paths
+    // Do not forget to `npm i -D tsconfig-paths`
     "require": ["tsconfig-paths/register"]
   }
 }

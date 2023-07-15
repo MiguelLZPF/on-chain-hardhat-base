@@ -1,26 +1,31 @@
-import { DEPLOY, GAS_OPT } from "../configuration";
-import { ghre } from "./utils";
-import * as fs from "async-file";
+import { BLOCKCHAIN, CONTRACTS, DEPLOY, GAS_OPT } from "configuration";
+import {
+  chainIdToNetwork,
+  getArtifact,
+  getContractInstance,
+  ghre,
+  gNetwork,
+  gProvider,
+} from "scripts/utils";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
-import { Contract, ContractReceipt, Signer } from "ethers";
+import { Contract, ContractReceipt, Signer, PayableOverrides, ContractFactory } from "ethers";
 import { isAddress, keccak256 } from "ethers/lib/utils";
 import {
+  IDeployReturn,
   INetworkDeployment,
   IRegularDeployment,
   IUpgradeDeployment,
-  networks,
-} from "../models/Deploy";
-import * as ProxyAdmin_Artifact from "../node_modules/@openzeppelin/contracts/build/contracts/ProxyAdmin.json";
-import * as TUP_Artifact from "../node_modules/@openzeppelin/contracts/build/contracts/TransparentUpgradeableProxy.json";
+  IUpgradeReturn,
+  IUpgrDeployReturn,
+} from "models/Deploy";
 import yesno from "yesno";
-import { PromiseOrValue } from "../typechain-types/common";
-import {
-  ProxyAdmin,
-  ProxyAdmin__factory,
-  TransparentUpgradeableProxy__factory,
-} from "../typechain-types";
+import { PromiseOrValue } from "typechain-types/common";
+import { ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { ContractName } from "models/Configuration";
 
-const PROXY_ADMIN_CODEHASH = keccak256(ProxyAdmin_Artifact.deployedBytecode);
+const PROXY_ADMIN_ARTIFACT = getArtifact("ProxyAdmin");
+const PROXY_ADMIN_CODEHASH = keccak256(PROXY_ADMIN_ARTIFACT.deployedBytecode);
 
 /**
  * Performs a regular deployment and updates the deployment information in deployments JSON file
@@ -30,28 +35,328 @@ const PROXY_ADMIN_CODEHASH = keccak256(ProxyAdmin_Artifact.deployedBytecode);
  * @param txValue contract creation transaccion value
  */
 export const deploy = async (
-  contractName: string,
+  contractName: ContractName,
   deployer: Signer,
-  args: unknown[],
-  txValue = 0
-) => {
-  const ethers = ghre.ethers;
-  const factory = await ethers.getContractFactory(contractName, deployer);
+  args: unknown[] = [],
+  tag?: string,
+  overrides?: PayableOverrides,
+  save: boolean = false
+): Promise<IDeployReturn> => {
+  // check if deployer is connected to the provider
+  deployer = deployer.provider ? deployer : deployer.connect(gProvider);
+  // get the artifact of the contract name
+  const artifact = await getArtifact(contractName);
+  // create factory instance and deploy
+  const factory = new ContractFactory(artifact.abi, artifact.bytecode, deployer);
+  // actual deployment
   const contract = await (
-    await factory.deploy(...args, { ...GAS_OPT.max, value: txValue })
+    await factory.deploy(...args, overrides ? overrides : { ...GAS_OPT.max })
   ).deployed();
+  const receipt = await contract.deployTransaction.wait();
   console.log(`
     Regular contract deployed:
       - Address: ${contract.address}
-      - Arguments: ${args}
-  `);
-  await saveDeployment({
+      - Arguments: ${args}`);
+  // save contract deployment information
+  const deployment: IRegularDeployment = {
     address: contract.address,
     contractName: contractName,
-    deployTimestamp: await getContractTimestamp(contract),
-    deployTxHash: contract.deployTransaction.hash,
-    byteCodeHash: keccak256(factory.bytecode),
-  } as IRegularDeployment);
+    deployTimestamp: await getContractTimestamp(contract, receipt.transactionHash),
+    deployTxHash: receipt.transactionHash,
+    byteCodeHash: keccak256(await gProvider.getCode(contract.address)),
+    tag: tag,
+  };
+  save ? await saveDeployment(deployment) : undefined;
+  return {
+    deployment: deployment,
+    contractInstance: contract,
+  };
+};
+
+/**
+ * Performs an upgradeable deployment and updates the deployment information in deployments JSON file
+ * @param contractName name of the contract to be deployed
+ * @param deployer signer used to sign deploy transacciation
+ * @param args arguments to use in the initializer
+ * @param txValue contract creation transaccion value
+ * @param proxyAdmin (optional ? PROXY_ADMIN_ADDRESS) custom proxy admin address
+ */
+export const deployUpgradeable = async (
+  contractName: ContractName,
+  deployer: Signer,
+  args: unknown[] = [],
+  tag?: string,
+  overrides?: PayableOverrides,
+  proxyAdmin: string | ProxyAdmin | undefined = CONTRACTS.get("ProxyAdmin")?.address.get(
+    gNetwork.name
+  ),
+  initialize: boolean = false,
+  save: boolean = false
+): Promise<IUpgrDeployReturn> => {
+  //* Proxy Admin
+  // save or update Proxy Admin in deployments
+  let adminDeployment: Promise<IRegularDeployment | undefined> | IRegularDeployment | undefined;
+  if (proxyAdmin && typeof proxyAdmin == "string" && isAddress(proxyAdmin)) {
+    proxyAdmin = await getContractInstance<ProxyAdmin>("ProxyAdmin", deployer, proxyAdmin);
+  } else if (proxyAdmin && typeof proxyAdmin == "string") {
+    throw new Error("String provided as Proxy Admin's address is not an address");
+  } else if (!proxyAdmin) {
+    const firstDeployedAdmin = await getProxyAdminDeployment();
+    if (firstDeployedAdmin && firstDeployedAdmin.address) {
+      // use the first existant proxy admin deployment
+      proxyAdmin = await getContractInstance<ProxyAdmin>(
+        "ProxyAdmin",
+        deployer,
+        firstDeployedAdmin.address
+      );
+    } else {
+      // deploy new Proxy Admin
+      const ok = await yesno({
+        question: "No ProxyAdmin provided. Do you want to deploy a new Proxy Admin?",
+      });
+      if (!ok) {
+        throw new Error("Deployment aborted");
+      }
+      const deployResult = await deploy(
+        "ProxyAdmin",
+        deployer,
+        undefined,
+        undefined,
+        undefined,
+        false
+      );
+      proxyAdmin = deployResult.contractInstance as ProxyAdmin;
+      adminDeployment = deployResult.deployment;
+    }
+  } else {
+    // proxy admin given as Contract
+    proxyAdmin = proxyAdmin as ProxyAdmin;
+  }
+  // check if proxy admin is a ProxyAdmin Contract
+  try {
+    const proxyAdminCode = await deployer.provider!.getCode(proxyAdmin.address);
+    if (keccak256(proxyAdminCode) != PROXY_ADMIN_CODEHASH) {
+      throw new Error(`ERROR: ProxyAdmin(${proxyAdmin.address}) is not a ProxyAdmin Contract`);
+    }
+  } catch (error) {
+    throw new Error(`ERROR: ProxyAdmin(${proxyAdmin.address}) is not a ProxyAdmin Contract`);
+  }
+  adminDeployment = (await adminDeployment)
+    ? adminDeployment
+    : getProxyAdminDeployment(undefined, proxyAdmin.address);
+  //* Actual contracts
+  const deployResult = await deploy(
+    contractName,
+    deployer,
+    undefined,
+    undefined,
+    GAS_OPT.max,
+    false
+  );
+  const logic = deployResult.contractInstance;
+  const timestamp = getContractTimestamp(logic);
+  if (!logic || !logic.address) {
+    throw new Error("Logic|Implementation not deployed properly");
+  }
+  console.log(`Logic contract deployed at: ${logic.address}`);
+  // -- encode function params for TUP
+  let initData: string;
+  if (initialize) {
+    initData = logic.interface.encodeFunctionData("initialize", [...args]);
+  } else {
+    initData = logic.interface._encodeParams([], []);
+  }
+  console.log(`Initialize data to be used: ${initData}`);
+  //* TUP - Transparent Upgradeable Proxy
+  const tupDeployResult = await deploy(
+    "TUP",
+    deployer,
+    [logic.address, proxyAdmin.address, initData],
+    undefined,
+    overrides,
+    false
+  );
+  const tuProxy = tupDeployResult.contractInstance as TransparentUpgradeableProxy;
+  if (!tuProxy || !tuProxy.address) {
+    throw new Error("Proxy|Storage not deployed properly");
+  }
+
+  console.log(`
+    Upgradeable contract deployed:
+      - Proxy Admin: ${proxyAdmin.address},
+      - Proxy: ${tuProxy.address},
+      - Logic: ${logic.address}
+      - Arguments: ${args}
+  `);
+  // store deployment information
+  const deployment = {
+    admin: proxyAdmin.address,
+    proxy: tuProxy.address,
+    logic: logic.address,
+    contractName: contractName,
+    deployTimestamp: await timestamp,
+    proxyDeployTxHash: tupDeployResult.deployment.deployTxHash,
+    logicDeployTxHash: logic.deployTransaction.hash,
+    byteCodeHash: keccak256(await deployer.provider!.getCode(logic.address)),
+    tag: tag,
+  } as IUpgradeDeployment;
+  adminDeployment = (await adminDeployment)
+    ? await adminDeployment
+    : {
+        address: proxyAdmin.address,
+        contractName: CONTRACTS.get("ProxyAdmin")!.name,
+        byteCodeHash: PROXY_ADMIN_CODEHASH,
+      };
+  save ? await saveDeployment(deployment, adminDeployment) : undefined;
+  return {
+    deployment: deployment,
+    adminDeployment: adminDeployment,
+    proxyAdminInstance: proxyAdmin,
+    tupInstance: tuProxy,
+    logicInstance: logic,
+    contractInstance: new Contract(tuProxy.address, logic.interface, deployer),
+  };
+};
+
+/**
+ * Upgrades the logic Contract of an upgradeable deployment and updates the deployment information in deployments JSON file
+ * @param contractName name of the contract to be upgraded (main use: get factory)
+ * @param deployer signer used to sign transacciations
+ * @param args arguments to use in the initializer
+ * @param proxy (optional) [undefined] address to identifie multiple contracts with the same name and network
+ * @param proxyAdmin (optional) [ROXY_ADMIN_ADDRESS] custom proxy admin address
+ */
+export const upgrade = async (
+  contractName: ContractName,
+  deployer: Signer,
+  args: unknown[],
+  proxy: string,
+  proxyAdmin?: string | ProxyAdmin,
+  initialize: boolean = false,
+  save: boolean = false
+): Promise<IUpgradeReturn> => {
+  let contractDeployment: PromiseOrValue<IUpgradeDeployment> = getContractDeployment(
+    proxy
+  ) as Promise<IUpgradeDeployment>;
+  //* Proxy Admin
+  if (proxyAdmin && typeof proxyAdmin == "string" && isAddress(proxyAdmin)) {
+    // use given address as ProxyAdmin
+    proxyAdmin = await getContractInstance<ProxyAdmin>("ProxyAdmin", deployer, proxyAdmin);
+  } else if (proxyAdmin && typeof proxyAdmin == "string" /*  && !isAddress(proxyAdmin) */) {
+    // given a proxy admin but is not an address nor a ProxyAdmin
+    throw new Error("String provided as Proxy Admin's address is not an address");
+  } else if (proxyAdmin && typeof proxyAdmin != "string") {
+    // use given ProxyAdmin
+    proxyAdmin = proxyAdmin as ProxyAdmin;
+  } else {
+    // no proxy admin provided
+    if (!(await contractDeployment).admin) {
+      throw new Error(`ERROR: No proxy deployment found for proxy address: ${proxy}`);
+    }
+    proxyAdmin = await getContractInstance<ProxyAdmin>(
+      "ProxyAdmin",
+      deployer,
+      (
+        await contractDeployment
+      ).admin
+    );
+  }
+  // check if proxy admin is a ProxyAdmin Contract
+  try {
+    const proxyAdminCode = await deployer.provider!.getCode(proxyAdmin.address);
+    if (keccak256(proxyAdminCode) != PROXY_ADMIN_CODEHASH) {
+      throw new Error(`ERROR: ProxyAdmin(${proxyAdmin.address}) is not a ProxyAdmin Contract`);
+    }
+  } catch (error) {
+    throw new Error(`ERROR: ProxyAdmin(${proxyAdmin.address}) is not a ProxyAdmin Contract`);
+  }
+  //* Actual contracts
+  const deployResult = await deploy(
+    contractName,
+    deployer,
+    undefined,
+    undefined,
+    GAS_OPT.max,
+    false
+  );
+  const newLogic = deployResult.contractInstance;
+  const timestamp = getContractTimestamp(newLogic);
+  if (!newLogic || !newLogic.address) {
+    throw new Error("Logic|Implementation not deployed properly");
+  }
+  console.log(`New logic contract deployed at: ${newLogic.address}`);
+
+  // -- encode function params for TUP
+  let initData: string;
+  if (initialize) {
+    initData = newLogic.interface.encodeFunctionData("initialize", [...args]);
+  } else {
+    initData = newLogic.interface._encodeParams([], []);
+  }
+  //* TUP - Transparent Upgradeable Proxy
+  contractDeployment = await contractDeployment;
+  // Previous Logic
+  const previousLogic: Promise<string> = proxyAdmin.getProxyImplementation(
+    contractDeployment.proxy
+  );
+  let receipt: ContractReceipt;
+  if (!contractDeployment.proxy) {
+    throw new Error("ERROR: contract retrieved is not upgradeable");
+  } else if (args.length > 0) {
+    console.log(
+      `Performing upgrade and call from ${proxyAdmin.address} to proxy ${contractDeployment.proxy} from logic ${contractDeployment.logic} to ${newLogic.address}`
+    );
+    receipt = await (
+      await proxyAdmin.upgradeAndCall(
+        contractDeployment.proxy,
+        newLogic.address,
+        initData,
+        GAS_OPT.max
+      )
+    ).wait();
+  } else {
+    console.log(
+      `Performing upgrade from ${proxyAdmin.address} to proxy ${contractDeployment.proxy} from logic ${contractDeployment.logic} to ${newLogic.address}`
+    );
+    receipt = await (
+      await proxyAdmin.upgrade(contractDeployment.proxy, newLogic.address, GAS_OPT.max)
+    ).wait();
+  }
+  if (!receipt) {
+    throw new Error("Transaction execution failed. Undefined Receipt");
+  }
+  const newLogicFromAdmin: Promise<string> = proxyAdmin.getProxyImplementation(
+    contractDeployment.proxy
+  );
+  if ((await newLogicFromAdmin) == (await previousLogic)) {
+    throw new Error("Upgrade failed. Previous address and new one are the same");
+  }
+  if ((await newLogicFromAdmin) != newLogic.address) {
+    throw new Error("Upgrade failed. Logic addresess does not match");
+  }
+
+  console.log(`
+    Contract upgraded:
+      - Proxy Admin: ${proxyAdmin.address}
+      - Proxy: ${contractDeployment.proxy}
+      - Previous Logic: ${await previousLogic}
+      - New Logic: ${await newLogicFromAdmin}
+      - Arguments: ${args}
+  `);
+  // update deployment information
+  contractDeployment.logic = newLogic.address;
+  contractDeployment.contractName = contractName;
+  contractDeployment.logicDeployTxHash = newLogic.deployTransaction.hash;
+  contractDeployment.byteCodeHash = keccak256(await deployer.provider!.getCode(newLogic.address));
+  contractDeployment.upgradeTimestamp = await timestamp;
+  if (save) {
+    // store deployment information
+    await saveDeployment(contractDeployment);
+  }
+  return {
+    deployment: contractDeployment,
+    contractInstance: new Contract(contractDeployment.proxy, newLogic.interface, deployer),
+  };
 };
 
 export const getLogic = async (
@@ -64,11 +369,11 @@ export const getLogic = async (
     throw new Error(`ERROR: ${proxy} NOT found in this network`);
   }
   // instanciate the ProxyAdmin
-  const proxyAdminContract = new Contract(
-    proxyAdmin,
-    ProxyAdmin_Artifact.abi,
-    hre.ethers.provider
-  ) as ProxyAdmin;
+  const proxyAdminContract = await getContractInstance<ProxyAdmin>(
+    "ProxyAdmin",
+    undefined,
+    proxyAdmin
+  );
 
   // check if proxy admin is a ProxyAdmin Contract
   try {
@@ -117,11 +422,11 @@ export const changeLogic = async (
     throw new Error(`ERROR: ${proxy} NOT found in this network`);
   }
   // instanciate the ProxyAdmin
-  const proxyAdminContract = new Contract(
-    proxyAdmin,
-    ProxyAdmin_Artifact.abi,
-    signer
-  ) as ProxyAdmin;
+  const proxyAdminContract = await getContractInstance<ProxyAdmin>(
+    "ProxyAdmin",
+    signer,
+    proxyAdmin
+  );
 
   try {
     const proxyAdminCode = await signer.provider!.getCode(proxyAdmin);
@@ -153,9 +458,10 @@ export const saveDeployment = async (
   let { networkIndex, netDeployment, deployments } = await getActualNetDeployment();
   // if no deployed yet in this network
   if (networkIndex == undefined) {
-    const provider = ghre.ethers.provider;
-    const network = networks.get(
-      provider.network ? provider.network.chainId : (await provider.getNetwork()).chainId
+    const network = BLOCKCHAIN.networks.get(
+      chainIdToNetwork.get(
+        gProvider.network ? gProvider.network.chainId : (await gProvider.getNetwork()).chainId
+      )
     )!;
     netDeployment = {
       network: {
@@ -206,7 +512,7 @@ export const saveDeployment = async (
   }
 
   // store/write deployments JSON file
-  await fs.writeFile(DEPLOY.deploymentsPath, JSON.stringify(deployments));
+  writeFileSync(DEPLOY.deploymentsPath, JSON.stringify(deployments));
 };
 
 /**
@@ -282,14 +588,15 @@ const getContractDeployment = async (addressOrName: string) => {
  * @returns Network Deployment object
  */
 const getActualNetDeployment = async (hre?: HardhatRuntimeEnvironment) => {
-  const provider = hre ? hre.ethers.provider : ghre.ethers.provider;
-  const network = networks.get(
-    provider.network ? provider.network.chainId : (await provider.getNetwork()).chainId
+  const network = BLOCKCHAIN.networks.get(
+    chainIdToNetwork.get(
+      gProvider.network ? gProvider.network.chainId : (await gProvider.getNetwork()).chainId
+    )
   )!;
   let deployments: INetworkDeployment[] = [];
   // if the file exists, get previous data
-  if (await fs.exists(DEPLOY.deploymentsPath)) {
-    deployments = JSON.parse(await fs.readFile(DEPLOY.deploymentsPath));
+  if (existsSync(DEPLOY.deploymentsPath)) {
+    deployments = JSON.parse(readFileSync(DEPLOY.deploymentsPath, "utf-8"));
   } else {
     console.warn("WARN: no deplyments file, createing a new one...");
   }
