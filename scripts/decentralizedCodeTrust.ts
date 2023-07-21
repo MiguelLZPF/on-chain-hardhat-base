@@ -19,13 +19,6 @@ export const deployCodeTrust = async (deployer: Signer) => {
     }
   }
   // deploy using scripts/deploy
-  const result = await deploy(
-    CONTRAC_NAME,
-    deployer,
-    [],
-    undefined,
-    undefined,
-    false
-  )
-  return {contractInstance: result.contractInstance as CodeTrust, deployment: result.deployment}};
+  const result = await deploy(CONTRAC_NAME, deployer, [], undefined, undefined, false);
+  return { contractInstance: result.contractInstance as CodeTrust, deployment: result.deployment };
 };

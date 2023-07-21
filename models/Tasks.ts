@@ -31,6 +31,13 @@ export interface IGetMnemonic {
   password: string;
 }
 
+export interface IInitialize extends ISignerInformation {
+  deployContractDeployer: boolean;
+  existingCodeTrust?: string;
+  existingContractRegistry?: string;
+  existingContractDeployer?: string;
+}
+
 export interface IDeploy extends ISignerInformation {
   upgradeable: boolean;
   contractName: ContractName;

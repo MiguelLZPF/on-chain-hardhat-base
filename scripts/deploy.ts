@@ -21,7 +21,7 @@ import {
 import yesno from "yesno";
 import { PromiseOrValue } from "typechain-types/common";
 import { ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import { ContractName } from "models/Configuration";
 
 const PROXY_ADMIN_ARTIFACT = getArtifact("ProxyAdmin");
@@ -595,7 +595,7 @@ const getActualNetDeployment = async (hre?: HardhatRuntimeEnvironment) => {
   )!;
   let deployments: INetworkDeployment[] = [];
   // if the file exists, get previous data
-  if (existsSync(DEPLOY.deploymentsPath)) {
+  if (existsSync(DEPLOY.deploymentsPath) && statSync(DEPLOY.deploymentsPath).size > 5) {
     deployments = JSON.parse(readFileSync(DEPLOY.deploymentsPath, "utf-8"));
   } else {
     console.warn("WARN: no deplyments file, createing a new one...");

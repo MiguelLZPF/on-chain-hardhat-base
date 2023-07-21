@@ -5,10 +5,10 @@ import { subtask, task, types } from "hardhat/config";
 import { HardhatRuntimeEnvironment, HardhatUserConfig } from "hardhat/types";
 import { BigNumber, Wallet, Contract } from "ethers";
 import { Mnemonic } from "ethers/lib/utils";
-import { BLOCKCHAIN, GAS_OPT, KEYSTORE } from "configuration";
+import { BLOCKCHAIN, CONTRACTS, GAS_OPT, KEYSTORE } from "configuration";
 import { decryptWallet, generateWallet, generateWallets } from "scripts/wallets";
 import { changeLogic, deploy, deployUpgradeable, getLogic, upgrade } from "scripts/deploy";
-import { getContractInstance, setGlobalHRE } from "scripts/utils";
+import { gNetwork, getContractInstance, setGlobalHRE } from "scripts/utils";
 import {
   ICallContract,
   IChangeLogic,
@@ -17,10 +17,12 @@ import {
   IGetLogic,
   IGetMnemonic,
   IGetWalletInfo,
+  IInitialize,
   ISignerInformation,
   IUpgrade,
 } from "models/Tasks";
 import JSON5 from "json5";
+import { initialize } from "scripts/standardContractRegistry";
 
 //* TASKS
 subtask("create-signer", "Creates new signer from given params")
@@ -254,6 +256,87 @@ task("get-mnemonic", "Recover mnemonic phrase from an encrypted wallet")
   });
 
 // DEPLOYMENTS
+task(
+  "scr-initialize",
+  "Initialize the '--network' to be able to work with Standard Contract Registry"
+)
+  .addFlag("deployContractDeployer", "Deploy the optional ContractDeployer Smart Contract")
+  .addOptionalParam(
+    "existingCodeTrust",
+    "Optional address to use as the default CodeTrust Contract",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "existingContractRegistry",
+    "Optional address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "existingContractDeployer",
+    "Optional address to use as the default optional ContractDeployer Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IInitialize, hre) => {
+    await setGlobalHRE(hre);
+    const wallet = await hre.run("create-signer", {
+      relativePath: args.relativePath,
+      password: args.password,
+      privateKey: args.privateKey,
+      mnemonicPhrase: args.mnemonicPhrase,
+      mnemonicPath: args.mnemonicPath,
+      mnemonicLocale: args.mnemonicLocale,
+    } as ISignerInformation);
+
+    await initialize(
+      wallet,
+      args.deployContractDeployer,
+      args.existingCodeTrust || CONTRACTS.get("CodeTrust")?.address.get(gNetwork.name),
+      args.existingContractRegistry ||
+        CONTRACTS.get("ContractRegistry")?.address.get(gNetwork.name),
+      args.existingContractDeployer || CONTRACTS.get("ContractDeployer")?.address.get(gNetwork.name)
+    );
+  });
+
 task("deploy", "Deploy smart contracts on '--network'")
   .addFlag("upgradeable", "Deploy as upgradeable")
   .addPositionalParam("contractName", "Name of the contract to deploy", undefined, types.string)

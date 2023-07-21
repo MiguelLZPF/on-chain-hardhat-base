@@ -1,5 +1,5 @@
 import { CONTRACTS, DEPLOY, GAS_OPT } from "configuration";
-import { gNetwork, gProvider, getArtifact, ghre } from "scripts/utils";
+import { gNetwork, gProvider, getArtifact, getContractInstance, ghre } from "scripts/utils";
 import { Signer, Contract } from "ethers";
 import {
   isAddress,
@@ -17,10 +17,11 @@ import {
   ContractDeployer,
   IContractRegistry,
 } from "node_modules/standard-contract-registry/typechain-types";
-import { deploy } from "scripts/deploy";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { deploy, saveDeployment } from "scripts/deploy";
+import { existsSync, readFileSync } from "fs";
 import { ContractName } from "models/Configuration";
 import { ContractRecordStructOutput } from "standard-contract-registry/typechain-types/artifacts/contracts/interfaces/IContractRegistry";
+import { IRegularDeployment } from "models/Deploy";
 
 export const initialize = async (
   systemSigner: Signer,
@@ -29,25 +30,24 @@ export const initialize = async (
   existingContractRegistry?: string,
   existingContractDeployer?: string
 ) => {
-  let provider = systemSigner.provider ? systemSigner.provider : gProvider;
+  // check if systemSigner is connected
+  systemSigner = systemSigner.provider ? systemSigner : systemSigner.connect(gProvider);
+  //* Get instance or deploy contracts
   let codeTrust: CodeTrust;
+  let contractDeployer: ContractDeployer | undefined;
+  let contractRegistry: ContractRegistry;
   if (existingCodeTrust && isAddress(existingCodeTrust)) {
-    codeTrust = new Contract(
-      existingCodeTrust,
-      CONTRACTS.get("CodeTrust")!.artifact,
-      systemSigner
-    ) as CodeTrust;
+    codeTrust = await getContractInstance<CodeTrust>("CodeTrust", systemSigner, existingCodeTrust);
   } else {
     const result = await deployCodeTrust(systemSigner);
     codeTrust = result.contractInstance;
   }
-  let contractRegistry: ContractRegistry;
   if (existingContractRegistry && isAddress(existingContractRegistry)) {
-    contractRegistry = new Contract(
-      existingContractRegistry,
-      CONTRACTS.get("ContractRegistry")!.artifact,
-      systemSigner
-    ) as ContractRegistry;
+    contractRegistry = await getContractInstance<ContractRegistry>(
+      "ContractRegistry",
+      systemSigner,
+      existingCodeTrust
+    );
   } else {
     const result = await deploy(
       "ContractRegistry",
@@ -59,14 +59,13 @@ export const initialize = async (
     );
     contractRegistry = result.contractInstance as ContractRegistry;
   }
-  let contractDeployer: ContractDeployer | undefined;
   if (deployContractDeployer) {
     if (existingContractDeployer && isAddress(existingContractDeployer)) {
-      contractDeployer = new Contract(
-        existingContractDeployer,
-        CONTRACTS.get("ContractDeployer")!.artifact,
-        systemSigner
-      ) as ContractDeployer;
+      contractDeployer = await getContractInstance<ContractDeployer>(
+        "ContractDeployer",
+        systemSigner,
+        existingCodeTrust
+      );
     } else {
       const result = await deploy(
         "ContractDeployer",
@@ -85,8 +84,8 @@ export const initialize = async (
     systemSigner,
     "CodeTrust",
     undefined,
-    undefined,
-    undefined,
+    codeTrust.address,
+    codeTrust.address,
     undefined,
     contractRegistry
   );
@@ -95,20 +94,19 @@ export const initialize = async (
     systemSigner,
     "ContractRegistry",
     undefined,
-    undefined,
-    undefined,
+    contractRegistry.address,
+    contractRegistry.address,
     undefined,
     contractRegistry
   );
-
   const deployerRecord = contractDeployer
     ? await register(
         "01.00",
         systemSigner,
         "ContractDeployer",
         undefined,
-        undefined,
-        undefined,
+        contractDeployer.address,
+        contractDeployer.address,
         undefined,
         contractRegistry
       )
@@ -125,14 +123,36 @@ export const initialize = async (
   }
 
   // Save ContractRegistry deploy information
-  const objectToSave = {
-    codeTrust: Object.fromEntries(Object.entries(codeTrustRecord)),
-    contractRegistry: Object.fromEntries(Object.entries(registryRecord)),
-    contractDeployer: deployerRecord
-      ? Object.fromEntries(Object.entries(deployerRecord))
+  const objectToSave: Array<IRegularDeployment | undefined> = [
+    {
+      contractName: CONTRACTS.get("CodeTrust")?.name!,
+      address: codeTrustRecord.logic,
+      byteCodeHash: codeTrustRecord.logicCodeHash,
+      deployTimestamp: new Date(codeTrustRecord.timestamp.toNumber() * 1000),
+      tag: "CodeTrust_Test",
+    },
+    {
+      contractName: CONTRACTS.get("ContractRegistry")?.name!,
+      address: registryRecord.logic,
+      byteCodeHash: registryRecord.logicCodeHash,
+      deployTimestamp: new Date(registryRecord.timestamp.toNumber() * 1000),
+      tag: "ContractRegistry_Test",
+    },
+    contractDeployer
+      ? {
+          contractName: CONTRACTS.get("ContractDeployer")?.name!,
+          address: deployerRecord!.logic,
+          byteCodeHash: deployerRecord!.logicCodeHash,
+          deployTimestamp: new Date(deployerRecord!.timestamp.toNumber() * 1000),
+          tag: "ContractDeployer_Test",
+        }
       : undefined,
-  };
-  writeFileSync(DEPLOY.deploymentsPath, JSON.stringify(objectToSave));
+  ];
+  // Actual write operation happens here
+  await saveDeployment(objectToSave[0]!),
+  await saveDeployment(objectToSave[1]!),
+  objectToSave[2] ? await saveDeployment(objectToSave[2]) : undefined;
+  
   return objectToSave;
 };
 
@@ -158,7 +178,7 @@ const register = async (
   }
   logicCodeHash = logicCodeHash
     ? logicCodeHash
-    : keccak256((await getArtifact(contractName)).deployedBytecode);
+    : keccak256(getArtifact(contractName).deployedBytecode);
 
   const receipt = await (
     await contractRegistry.register(
@@ -171,6 +191,7 @@ const register = async (
       GAS_OPT.max
     )
   ).wait();
+
   if (!receipt || !receipt.transactionHash) {
     throw new Error("ERROR: Transaction not executed, no valid receipt found");
   }
