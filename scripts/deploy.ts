@@ -45,7 +45,7 @@ export const deploy = async (
   // check if deployer is connected to the provider
   deployer = deployer.provider ? deployer : deployer.connect(gProvider);
   // get the artifact of the contract name
-  const artifact = await getArtifact(contractName);
+  const artifact = getArtifact(contractName);
   // create factory instance and deploy
   const factory = new ContractFactory(artifact.abi, artifact.bytecode, deployer);
   // actual deployment
@@ -560,7 +560,7 @@ const getProxyAdminDeployment = async (proxy?: string, adminAddress?: string) =>
  * @param addressOrName address or name that identifies a contract in a network deployment
  * @returns Contract Deployment object
  */
-const getContractDeployment = async (addressOrName: string) => {
+export const getContractDeployment = async (addressOrName: string) => {
   const { networkIndex, netDeployment, deployments } = await getActualNetDeployment();
 
   if (networkIndex == undefined || !netDeployment) {

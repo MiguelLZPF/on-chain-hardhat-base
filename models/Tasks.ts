@@ -1,4 +1,6 @@
+import { BytesLike } from "ethers";
 import { ContractName } from "models/Configuration";
+import { IContractRegistry, Ownable } from "standard-contract-registry/typechain-types";
 
 //* Tasks Interfaces
 export interface ISignerInformation {
@@ -31,13 +33,7 @@ export interface IGetMnemonic {
   password: string;
 }
 
-export interface IInitialize extends ISignerInformation {
-  deployContractDeployer: boolean;
-  existingCodeTrust?: string;
-  existingContractRegistry?: string;
-  existingContractDeployer?: string;
-}
-
+//* Deployments
 export interface IDeploy extends ISignerInformation {
   upgradeable: boolean;
   contractName: ContractName;
@@ -76,4 +72,34 @@ export interface IChangeLogic extends ISignerInformation {
   proxy: string;
   proxyAdmin?: string;
   newLogic: string;
+}
+
+//* SCR
+export interface IInitialize extends ISignerInformation {
+  deployContractDeployer: boolean;
+  existingCodeTrust?: string;
+  existingContractRegistry?: string;
+  existingContractDeployer?: string;
+}
+
+export interface IRegister extends ISignerInformation {
+  recordVersion: string;
+  contractName?: ContractName;
+  recordName?: string;
+  proxy?: string;
+  logic?: string;
+  logicCodeHash?: BytesLike;
+  contractRegistry?: string | (IContractRegistry & Ownable);
+}
+
+export interface IGetRecord extends ISignerInformation {
+  recordName: string;
+  admin?: string;
+  recordVersion?: string;
+  contractRegistry?: string | (IContractRegistry & Ownable);
+}
+
+export interface IGetRecords extends ISignerInformation {
+  admin?: string;
+  contractRegistry?: string | (IContractRegistry & Ownable);
 }

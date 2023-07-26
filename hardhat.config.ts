@@ -16,13 +16,17 @@ import {
   IGenerateWallets,
   IGetLogic,
   IGetMnemonic,
+  IGetRecord,
+  IGetRecords,
   IGetWalletInfo,
   IInitialize,
+  IRegister,
   ISignerInformation,
   IUpgrade,
 } from "models/Tasks";
 import JSON5 from "json5";
-import { initialize } from "scripts/standardContractRegistry";
+import { getRecord, getRecords, initialize, register } from "scripts/standardContractRegistry";
+import { network } from "hardhat";
 
 //* TASKS
 subtask("create-signer", "Creates new signer from given params")
@@ -256,87 +260,6 @@ task("get-mnemonic", "Recover mnemonic phrase from an encrypted wallet")
   });
 
 // DEPLOYMENTS
-task(
-  "scr-initialize",
-  "Initialize the '--network' to be able to work with Standard Contract Registry"
-)
-  .addFlag("deployContractDeployer", "Deploy the optional ContractDeployer Smart Contract")
-  .addOptionalParam(
-    "existingCodeTrust",
-    "Optional address to use as the default CodeTrust Contract",
-    undefined,
-    types.string
-  )
-  .addOptionalParam(
-    "existingContractRegistry",
-    "Optional address to use as the default ContractRegistry Contract",
-    undefined,
-    types.string
-  )
-  .addOptionalParam(
-    "existingContractDeployer",
-    "Optional address to use as the default optional ContractDeployer Contract",
-    undefined,
-    types.string
-  )
-  // Signer params
-  .addOptionalParam(
-    "relativePath",
-    "Path relative to KEYSTORE.root to store the wallets",
-    undefined,
-    types.string
-  )
-  .addOptionalParam(
-    "password",
-    "Password to decrypt the wallet",
-    KEYSTORE.default.password,
-    types.string
-  )
-  .addOptionalParam(
-    "privateKey",
-    "A private key in hexadecimal can be used to sign",
-    undefined,
-    types.string
-  )
-  .addOptionalParam(
-    "mnemonicPhrase",
-    "Mnemonic phrase to generate wallet from",
-    undefined,
-    types.string
-  )
-  .addOptionalParam(
-    "mnemonicPath",
-    "Mnemonic path to generate wallet from",
-    KEYSTORE.default.mnemonic.path,
-    types.string
-  )
-  .addOptionalParam(
-    "mnemonicLocale",
-    "Mnemonic locale to generate wallet from",
-    KEYSTORE.default.mnemonic.locale,
-    types.string
-  )
-  .setAction(async (args: IInitialize, hre) => {
-    await setGlobalHRE(hre);
-    const wallet = await hre.run("create-signer", {
-      relativePath: args.relativePath,
-      password: args.password,
-      privateKey: args.privateKey,
-      mnemonicPhrase: args.mnemonicPhrase,
-      mnemonicPath: args.mnemonicPath,
-      mnemonicLocale: args.mnemonicLocale,
-    } as ISignerInformation);
-
-    await initialize(
-      wallet,
-      args.deployContractDeployer,
-      args.existingCodeTrust || CONTRACTS.get("CodeTrust")?.address.get(gNetwork.name),
-      args.existingContractRegistry ||
-        CONTRACTS.get("ContractRegistry")?.address.get(gNetwork.name),
-      args.existingContractDeployer || CONTRACTS.get("ContractDeployer")?.address.get(gNetwork.name)
-    );
-  });
-
 task("deploy", "Deploy smart contracts on '--network'")
   .addFlag("upgradeable", "Deploy as upgradeable")
   .addPositionalParam("contractName", "Name of the contract to deploy", undefined, types.string)
@@ -441,7 +364,7 @@ task("deploy", "Deploy smart contracts on '--network'")
   });
 
 task("upgrade", "Upgrade smart contracts on '--network'")
-  .addPositionalParam("contractName", "Name of the contract to deploy", undefined, types.string)
+  .addPositionalParam("contractName", "Name of the contract to upgrade", undefined, types.string)
   .addPositionalParam("proxy", "Address of the TUP proxy", undefined, types.string)
   .addOptionalParam("proxyAdmin", "Address of a deloyed Proxy Admin", undefined, types.string)
   .addOptionalParam(
@@ -687,6 +610,336 @@ task("change-logic", "change the actual logic|implementation smart contract of a
         `);
   });
 
+//* SCR (Standard Contract Registry) Only tasks
+task(
+  "scr-initialize",
+  "Initialize the '--network' to be able to work with Standard Contract Registry"
+)
+  .addFlag("deployContractDeployer", "Deploy the optional ContractDeployer Smart Contract")
+  .addOptionalParam(
+    "existingCodeTrust",
+    "Optional address to use as the default CodeTrust Contract",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "existingContractRegistry",
+    "Optional address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "existingContractDeployer",
+    "Optional address to use as the default optional ContractDeployer Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IInitialize, hre) => {
+    await setGlobalHRE(hre);
+    const wallet = await hre.run("create-signer", {
+      relativePath: args.relativePath,
+      password: args.password,
+      privateKey: args.privateKey,
+      mnemonicPhrase: args.mnemonicPhrase,
+      mnemonicPath: args.mnemonicPath,
+      mnemonicLocale: args.mnemonicLocale,
+    } as ISignerInformation);
+
+    await initialize(
+      wallet,
+      args.deployContractDeployer,
+      args.existingCodeTrust || CONTRACTS.get("CodeTrust")?.address.get(gNetwork.name),
+      args.existingContractRegistry ||
+        CONTRACTS.get("ContractRegistry")?.address.get(gNetwork.name),
+      args.existingContractDeployer || CONTRACTS.get("ContractDeployer")?.address.get(gNetwork.name)
+    );
+  });
+
+task(
+  "scr-register",
+  "Register a Contract Deployment in Contract Registry with Standard Contract Registry model at '--network'"
+)
+  .addParam("recordVersion", "Initial version to be assigned to this contract record")
+  .addOptionalParam("contractName", "Name of the contract to use", undefined, types.string)
+  .addOptionalParam(
+    "recordName",
+    "Name to be use to register the contract record. It is used as key",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "proxy",
+    "Address of the proxy if is an upgradeable contract",
+    undefined,
+    types.string
+  )
+  .addOptionalParam("logic", "Address of the logic contract", undefined, types.string)
+  .addOptionalParam(
+    "logicCodeHash",
+    "Hash of the logic contract to identify deployed code",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "Optional address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IRegister, hre) => {
+    await setGlobalHRE(hre);
+    const wallet = await hre.run("create-signer", {
+      relativePath: args.relativePath,
+      password: args.password,
+      privateKey: args.privateKey,
+      mnemonicPhrase: args.mnemonicPhrase,
+      mnemonicPath: args.mnemonicPath,
+      mnemonicLocale: args.mnemonicLocale,
+    } as ISignerInformation);
+
+    await register(
+      args.recordVersion,
+      wallet,
+      args.contractName,
+      args.recordName,
+      args.proxy,
+      args.logic,
+      args.logicCodeHash,
+      args.contractRegistry
+    );
+  });
+
+task(
+  "scr-get-record",
+  "Get detail of one Record in Contract Registry of a given admin address with Standard Contract Registry model at '--network'. If not admin address provided, system record will be returned."
+)
+  .addParam(
+    "recordName",
+    "Name to be use to retreive the contract record. It is used as key",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "admin",
+    "Address of th admin account who registered the contract.",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "recordVersion",
+    "Version to be retreived of this contract record",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "(Optional) [Configuration or deployments.json] address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IGetRecord, hre) => {
+    await setGlobalHRE(hre);
+    if (!args.admin && (args.relativePath || args.privateKey || args.mnemonicPhrase)) {
+      args.admin = (
+        (await hre.run("create-signer", {
+          relativePath: args.relativePath,
+          password: args.password,
+          privateKey: args.privateKey,
+          mnemonicPhrase: args.mnemonicPhrase,
+          mnemonicPath: args.mnemonicPath,
+          mnemonicLocale: args.mnemonicLocale,
+        } as ISignerInformation)) as Wallet
+      ).address;
+    }
+    if (!args.admin) {
+      throw new Error("Admin or signer information needed to recover Contract Record");
+    }
+    console.log(
+      await getRecord(args.recordName, args.admin, args.recordVersion, args.contractRegistry)
+    );
+  });
+
+task(
+  "scr-get-records",
+  "Get all records in Contract Registry of a given admin address with Standard Contract Registry model at '--network'. If not admin address provided, system record will be returned."
+)
+  .addOptionalParam(
+    "admin",
+    "Address of th admin account who registered the contracts. 'system', 'System' or '' (empty) can be used to get the system records.",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "(Optional) [Configuration or deployments.json] address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IGetRecords, hre) => {
+    await setGlobalHRE(hre);
+    // Create Signer object only if not admin and parameters given
+    if (!args.admin && (args.relativePath || args.privateKey || args.mnemonicPhrase)) {
+      args.admin = (
+        (await hre.run("create-signer", {
+          relativePath: args.relativePath,
+          password: args.password,
+          privateKey: args.privateKey,
+          mnemonicPhrase: args.mnemonicPhrase,
+          mnemonicPath: args.mnemonicPath,
+          mnemonicLocale: args.mnemonicLocale,
+        } as ISignerInformation)) as Wallet
+      ).address;
+    }
+    console.log(await getRecords(args.admin, args.contractRegistry));
+  });
 // OTHER
 task("get-timestamp", "get the current timestamp in seconds")
   .addOptionalParam("timeToAdd", "time to add to the timestamp in seconds", 0, types.int)
