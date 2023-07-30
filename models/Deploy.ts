@@ -50,3 +50,9 @@ export interface IUpgrDeployReturn extends Omit<IDeployReturn, "deployment"> {
 export interface IUpgradeReturn extends Omit<IDeployReturn, "deployment"> {
   deployment: IUpgradeDeployment;
 }
+
+export interface IStorageOptions {
+  deployments: boolean;
+  scr: { version?: string, recordName?: string };
+  tag?: string;
+}

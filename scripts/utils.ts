@@ -116,3 +116,21 @@ export const logObject = (object: any) => {
 export function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/**
+ * Checks if an object is empty.
+ * An object is considered empty if it has no enumerable properties.
+ *
+ * @param obj - The object to be checked for emptiness.
+ * @returns `true` if the object is empty, `false` otherwise.
+ *
+ * @example
+ * const emptyObject = {};
+ * const nonEmptyObject = { key: 'value' };
+ *
+ * console.log(isObjectEmpty(emptyObject)); // Output: true
+ * console.log(isObjectEmpty(nonEmptyObject)); // Output: false
+ */
+export function isObjectEmpty(obj: object): boolean {
+  return Object.keys(obj).length === 0;
+}
