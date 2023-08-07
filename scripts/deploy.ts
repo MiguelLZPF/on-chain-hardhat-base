@@ -6,7 +6,6 @@ import {
   ghre,
   gNetwork,
   gProvider,
-  isObjectEmpty,
 } from "scripts/utils";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 import { Contract, ContractReceipt, Signer, PayableOverrides, ContractFactory } from "ethers";
@@ -26,7 +25,6 @@ import { ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
 import { readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import { ContractName } from "models/Configuration";
 import { getRecord, register } from "./standardContractRegistry";
-import { IContractDeployer } from "standard-contract-registry/typechain-types";
 import { IDecodedRecord } from "models/StandardContractRegistry";
 
 const PROXY_ADMIN_ARTIFACT = getArtifact("ProxyAdmin");
@@ -286,7 +284,7 @@ export const deployUpgradeable = async (
     proxyAdminInstance: proxyAdmin,
     tupInstance: tuProxy,
     logicInstance: logic,
-    contractInstance: new Contract(tuProxy.address, logic.interface, deployer),
+    contractInstance: await getContractInstance<Contract>(contractName, deployer, tuProxy.address),
   };
 };
 
@@ -343,14 +341,10 @@ export const upgrade = async (
     throw new Error(`ERROR: ProxyAdmin(${proxyAdmin.address}) is not a ProxyAdmin Contract`);
   }
   //* Actual contracts
-  const deployResult = await deploy(
-    contractName,
-    deployer,
-    undefined,
-    undefined,
-    GAS_OPT.max,
-    false
-  );
+  const deployResult = await deploy(contractName, deployer, undefined, GAS_OPT.max, {
+    offChain: false,
+    onChain: false,
+  });
   const newLogic = deployResult.contractInstance;
   const timestamp = getContractTimestamp(newLogic);
   if (!newLogic || !newLogic.address) {
