@@ -34,6 +34,7 @@ export interface IGetMnemonic {
 }
 
 //* Deployments
+// Deploy with option to deploy upgradeable
 export interface IDeploy extends ISignerInformation {
   upgradeable: boolean;
   contractName: ContractName;
@@ -43,6 +44,11 @@ export interface IDeploy extends ISignerInformation {
   noCompile: boolean;
   txValue: number;
   tag?: string;
+  storeOffChain?: boolean;
+  storeOnChain?: boolean;
+  recordName?: string;
+  recordVersion?: string;
+  contractRegistry?: string;
 }
 
 export interface IUpgrade extends ISignerInformation {

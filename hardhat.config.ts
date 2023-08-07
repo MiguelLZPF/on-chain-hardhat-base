@@ -265,19 +265,49 @@ task("deploy", "Deploy smart contracts on '--network'")
   .addPositionalParam("contractName", "Name of the contract to deploy", undefined, types.string)
   .addOptionalParam(
     "proxyAdmin",
-    "Address of a deloyed Proxy Admin. Only if --upgradeable deployment",
+    "(Optional) [First found in deployments file] Address of a deloyed Proxy Admin. Only if --upgradeable deployment",
     undefined,
     types.string
   )
   .addOptionalParam(
     "contractArgs",
-    "Contract initialize function's arguments if any",
+    "(Optional) [undefined] Contract initialize function's arguments if any",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "storeOffChain",
+    "(Optional) [false] Boolean to store deploy data off chain in the 'deployments' file",
+    undefined,
+    types.boolean
+  )
+  .addOptionalParam(
+    "storeOnChain",
+    "(Optional) [true] Boolean to store deploy data on chain in the Contract Registry",
+    undefined,
+    types.boolean
+  )
+  .addOptionalParam(
+    "recordName",
+    "(Optional) [undefined] Name to assign to the Record stored on chain. If storeOnChain is true",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "recordVersion",
+    "(Optional) [1.0] Version to assign to the Record stored on chain. If storeOnChain is true",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "(Optional) [CONTRCTS.contractRegistry] Contract Registry to use. If undefined use default. Only if storeOnChain is true",
     undefined,
     types.string
   )
   .addOptionalParam(
     "tag",
-    "Optional string to include metadata or anything related with a deployment",
+    "(Optional) [undefined] string to include metadata or anything related with a deployment. If storeOffChain is true",
     undefined,
     types.string
   )
@@ -342,23 +372,39 @@ task("deploy", "Deploy smart contracts on '--network'")
         args.contractName,
         wallet,
         args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
-        args.tag,
         { value: args.txValue, ...GAS_OPT.max },
         args.proxyAdmin,
         args.initialize || false,
-        true
+        {
+          offChain: args.storeOffChain || false,
+          onChain: args.storeOnChain || true,
+          scr: {
+            recordName: args.recordName,
+            version: args.recordVersion,
+            contractRegistry: args.contractRegistry,
+          },
+          tag: args.tag,
+        }
       );
     } else {
       await deploy(
         args.contractName,
         wallet,
         args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
-        args.tag,
         {
           ...GAS_OPT.max,
           value: args.txValue,
         },
-        true
+        {
+          offChain: args.storeOffChain || false,
+          onChain: args.storeOnChain || true,
+          scr: {
+            recordName: args.recordName,
+            version: args.recordVersion,
+            contractRegistry: args.contractRegistry,
+          },
+          tag: args.tag,
+        }
       );
     }
   });
