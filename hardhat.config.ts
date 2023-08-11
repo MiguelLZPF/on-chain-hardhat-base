@@ -25,8 +25,23 @@ import {
   IUpgrade,
 } from "models/Tasks";
 import JSON5 from "json5";
-import { getRecord, getRecords, initialize, register } from "scripts/standardContractRegistry";
+import {
+  deployWithContractDeployer,
+  deployWithUpgrDeployer,
+  getRecord,
+  getRecords,
+  initialize,
+  register,
+} from "scripts/standardContractRegistry";
 import { network } from "hardhat";
+import {
+  IDeployReturn,
+  IRegularDeployment,
+  IUpgrDeployReturn,
+  IUpgradeDeployment,
+} from "models/Deploy";
+import { isTrustedCode, trustCodeAt } from "scripts/decentralizedCodeTrust";
+import yesno from "yesno";
 
 //* TASKS
 subtask("create-signer", "Creates new signer from given params")
@@ -306,6 +321,18 @@ task("deploy", "Deploy smart contracts on '--network'")
     types.string
   )
   .addOptionalParam(
+    "contractDeployer",
+    "(Optional) [undefined] Contract Deployer to use for deploying the contract. Use 'default' keyword to use default one from config or deployments file.",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "upgradeableDeployer",
+    "(Optional) [undefined] Upgradeable Deployer to use for deploying the contract. Use 'default' keyword to use default one from config or deployments file.",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
     "tag",
     "(Optional) [undefined] string to include metadata or anything related with a deployment. If storeOffChain is true",
     undefined,
@@ -359,54 +386,136 @@ task("deploy", "Deploy smart contracts on '--network'")
     if (!args.noCompile) {
       await hre.run("compile");
     }
-    const wallet = await hre.run("create-signer", {
+    const wallet = (await hre.run("create-signer", {
       relativePath: args.relativePath,
       password: args.password,
       privateKey: args.privateKey,
       mnemonicPhrase: args.mnemonicPhrase,
       mnemonicPath: args.mnemonicPath,
       mnemonicLocale: args.mnemonicLocale,
-    } as ISignerInformation);
+    } as ISignerInformation)) as Wallet;
+    let result: IDeployReturn | IUpgrDeployReturn;
     if (args.upgradeable) {
-      await deployUpgradeable(
-        args.contractName,
-        wallet,
-        args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
-        { value: args.txValue, ...GAS_OPT.max },
-        args.proxyAdmin,
-        args.initialize || false,
-        {
-          offChain: args.storeOffChain || false,
-          onChain: args.storeOnChain || true,
-          scr: {
-            recordName: args.recordName,
-            version: args.recordVersion,
-            contractRegistry: args.contractRegistry,
-          },
-          tag: args.tag,
+      if (args.upgradeableDeployer) {
+        const isTrusted = await isTrustedCode(args.upgradeableDeployer, wallet.address, wallet);
+        if (!isTrusted) {
+          const yes = await yesno({
+            question: `Contract UpgradeableDeployer at ${args.upgradeableDeployer} han not been trusted yet. Do you accept to trust it for two minutes?`,
+          });
+          if (!yes) {
+            throw new Error(
+              "❌ Cannot proceed with deployment if UpgradeableDeployer is not trusted. You can trust it by yourself and then come back."
+            );
+          }
+          try {
+            await trustCodeAt(args.upgradeableDeployer, wallet, 120);
+          } catch (error) {
+            throw new Error(
+              `❌ Trusting UpgradeableDeployer at ${args.upgradeableDeployer} from ${wallet.address}`
+            );
+          }
         }
-      );
+        result = await deployWithUpgrDeployer(
+          args.contractName,
+          args.recordName || args.contractName,
+          wallet,
+          args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+          { value: args.txValue, ...GAS_OPT.max },
+          args.recordVersion,
+          args.contractRegistry,
+          args.upgradeableDeployer == "default" ? undefined : args.upgradeableDeployer
+        );
+      } else {
+        result = await deployUpgradeable(
+          args.contractName,
+          wallet,
+          args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+          { value: args.txValue, ...GAS_OPT.max },
+          args.proxyAdmin,
+          args.initialize || false,
+          {
+            offChain: args.storeOffChain || false,
+            onChain: args.storeOnChain || true,
+            scr: {
+              recordName: args.recordName,
+              version: args.recordVersion,
+              contractRegistry: args.contractRegistry,
+            },
+            tag: args.tag,
+          }
+        );
+      }
     } else {
-      await deploy(
-        args.contractName,
-        wallet,
-        args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
-        {
-          ...GAS_OPT.max,
-          value: args.txValue,
-        },
-        {
-          offChain: args.storeOffChain || false,
-          onChain: args.storeOnChain || true,
-          scr: {
-            recordName: args.recordName,
-            version: args.recordVersion,
-            contractRegistry: args.contractRegistry,
-          },
-          tag: args.tag,
+      if (args.contractDeployer) {
+        const isTrusted = await isTrustedCode(args.contractDeployer, wallet.address, wallet);
+        if (!isTrusted) {
+          const yes = await yesno({
+            question: `Contract ContractDeployer at ${args.contractDeployer} han not been trusted yet. Do you accept to trust it for two minutes?`,
+          });
+          if (!yes) {
+            throw new Error(
+              "❌ Cannot proceed with deployment if ContractDeployer is not trusted. You can trust it by yourself and then come back."
+            );
+          }
+          try {
+            await trustCodeAt(args.contractDeployer, wallet, 120);
+          } catch (error) {
+            throw new Error(
+              `❌ Trusting ContractDeployer at ${args.contractDeployer} from ${wallet.address}`
+            );
+          }
         }
-      );
+        result = await deployWithContractDeployer(
+          args.contractName,
+          args.recordName || args.contractName,
+          wallet,
+          args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+          { value: args.txValue, ...GAS_OPT.max },
+          args.recordVersion,
+          args.contractRegistry,
+          args.contractDeployer == "default" ? undefined : args.contractDeployer
+        );
+      } else {
+        result = await deploy(
+          args.contractName,
+          wallet,
+          args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+          {
+            ...GAS_OPT.max,
+            value: args.txValue,
+          },
+          {
+            offChain: args.storeOffChain || false,
+            onChain: args.storeOnChain || true,
+            scr: {
+              recordName: args.recordName,
+              version: args.recordVersion,
+              contractRegistry: args.contractRegistry,
+            },
+            tag: args.tag,
+          }
+        );
+      }
     }
+    //* Print Result on screen
+    console.log(`
+        ✅ 🎉 Contract deployed successfully! Contract Information:
+          - Contract Name (id within this project): ${args.contractName}
+          - Record Name (id within the Contract Registry): ${args.recordName}
+          - Logic Address (the only one if regular deployment): ${
+            (result.deployment as IRegularDeployment)?.address ||
+            (result.deployment as unknown as IUpgradeDeployment)?.logic ||
+            result.record?.logic
+          }
+          - Proxy Address (only if upgradeable deployment): ${
+            (result.deployment as unknown as IUpgradeDeployment)?.proxy || result.record?.proxy
+          }
+          - Admin or Deployer: ${wallet.address}
+          - Deploy Timestamp: ${result.deployment?.deployTimestamp || result.record?.timestamp}
+          - Bytecode Hash: ${result.deployment?.byteCodeHash || result.record?.logicCodeHash}
+          - Version (only if ContractRegistry): ${result.record?.version}
+          - Tag or extra data: ${args.tag || result.record?.extraData}
+      `);
   });
 
 task("upgrade", "Upgrade smart contracts on '--network'")

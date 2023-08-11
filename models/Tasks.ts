@@ -49,6 +49,8 @@ export interface IDeploy extends ISignerInformation {
   recordName?: string;
   recordVersion?: string;
   contractRegistry?: string;
+  contractDeployer?: string;
+  upgradeableDeployer?: string;
 }
 
 export interface IUpgrade extends ISignerInformation {

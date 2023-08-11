@@ -7,7 +7,7 @@ import {
   gNetwork,
   gProvider,
 } from "scripts/utils";
-import { HardhatRuntimeEnvironment } from "hardhat/types";
+import { Artifact, HardhatRuntimeEnvironment } from "hardhat/types";
 import { Contract, ContractReceipt, Signer, PayableOverrides, ContractFactory } from "ethers";
 import { isAddress, keccak256 } from "ethers/lib/utils";
 import {
@@ -21,13 +21,16 @@ import {
 } from "models/Deploy";
 import yesno from "yesno";
 import { PromiseOrValue } from "typechain-types/common";
-import { ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
+import { Ownable, ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
 import { readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import { ContractName } from "models/Configuration";
 import { getRecord, register } from "./standardContractRegistry";
 import { IDecodedRecord } from "models/StandardContractRegistry";
+import { IContractRegistry } from "standard-contract-registry/typechain-types";
 
-const PROXY_ADMIN_ARTIFACT = getArtifact("ProxyAdmin");
+const PROXY_ADMIN_ARTIFACT = JSON.parse(
+  readFileSync(CONTRACTS.get("ProxyAdmin")!.artifact, "utf-8")
+) as Artifact;
 const PROXY_ADMIN_CODEHASH = keccak256(PROXY_ADMIN_ARTIFACT.deployedBytecode);
 
 /**
@@ -46,11 +49,16 @@ export const deploy = async (
     onChain: true,
     offChain: false,
     tag: undefined,
-    scr: { recordName: contractName, version: "01.00" },
+    scr: {},
   }
 ): Promise<IDeployReturn> => {
   // check if deployer is connected to the provider
   deployer = deployer.provider ? deployer : deployer.connect(gProvider);
+  // (async) get Contract Registry instance
+  const contractRegistry = getContractInstance<IContractRegistry & Ownable>(
+    "ContractRegistry",
+    deployer
+  );
   // get the artifact of the contract name
   const artifact = getArtifact(contractName);
   // create factory instance and deploy
@@ -60,10 +68,10 @@ export const deploy = async (
     await factory.deploy(...args, overrides ? overrides : { ...GAS_OPT.max })
   ).deployed();
   const receipt = await contract.deployTransaction.wait();
-  console.log(`
-    Regular contract deployed:
-      - Address: ${contract.address}
-      - Arguments: ${args}`);
+  // console.log(`
+  //   Regular contract deployed:
+  //     - Address: ${contract.address}
+  //     - Arguments: ${args}`);
   //* Store contract deployment information
   const byteCodeHash = keccak256(await deployer.provider!.getCode(contract.address));
   const deployment: IRegularDeployment = {
@@ -79,29 +87,39 @@ export const deploy = async (
   // if on chain record store
   let newRecord: IDecodedRecord | undefined;
   if (storageOpt.onChain) {
+    // check default values
+    storageOpt.scr = storageOpt.scr || {
+      version: "01.00",
+      recordName: contractName,
+      contractRegistry: (await contractRegistry).address,
+    };
+    storageOpt.scr.version = storageOpt.scr.version || "01.00";
+    storageOpt.scr.recordName = storageOpt.scr.recordName || contractName;
+    storageOpt.scr.contractRegistry =
+      storageOpt.scr.contractRegistry || (await contractRegistry).address;
     try {
       await register(
-        storageOpt.scr!.version!,
+        storageOpt.scr.version,
         deployer,
         contractName,
-        storageOpt.scr!.recordName,
+        storageOpt.scr.recordName,
         undefined,
         contract.address,
         byteCodeHash,
-        storageOpt.scr!.contractRegistry
+        await contractRegistry
       );
     } catch (error) {
-      console.error(`Error registering deployment in ContractRegistry. ${error}`);
+      throw new Error(`❌ Registering deployment in ContractRegistry. ${error}`);
     }
     try {
       newRecord = await getRecord(
-        storageOpt.scr!.recordName!,
+        storageOpt.scr.recordName,
         await deployer.getAddress(),
-        storageOpt.scr!.version,
-        storageOpt.scr!.contractRegistry
+        storageOpt.scr.version,
+        storageOpt.scr.contractRegistry
       );
     } catch (error) {
-      console.error(`Error retreiving record deployment in ContractRegistry. ${error}`);
+      console.error(`❌ Error retreiving record deployment in ContractRegistry. ${error}`);
     }
   }
   return {

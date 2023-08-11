@@ -40,10 +40,10 @@ export const chainIdToNetwork = new Map<number | undefined, NetworkName>([
   [BLOCKCHAIN.networks.get("mainTest")!.chainId, "mainTest"],
 ]);
 
-export const getArtifact = (contractName?: ContractName, path?: string): Artifact => {
+export function getArtifact(contractName?: ContractName, path?: string): Artifact {
   path = path ? path : CONTRACTS.get(contractName!)!.artifact;
   return JSON.parse(readFileSync(path, "utf-8")) as Artifact;
-};
+}
 
 /**
  * Create a new instance of a deployed contract

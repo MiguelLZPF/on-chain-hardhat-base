@@ -1,6 +1,6 @@
 import { CONTRACTS, GAS_OPT } from "configuration";
 import { ADDR_ZERO, gNetwork, gProvider, getArtifact, getContractInstance } from "scripts/utils";
-import { Signer, VoidSigner, PayableOverrides, Contract } from "ethers";
+import { Signer, VoidSigner, PayableOverrides, Contract, ContractReceipt } from "ethers";
 import {
   isAddress,
   keccak256,
@@ -163,7 +163,7 @@ export const register = async (
   admin: Signer,
   contractName?: ContractName,
   recordName: string = CONTRACTS.get(contractName!)!.name,
-  proxy: string = CONTRACTS.get(contractName!)!.address.get(gNetwork.name!)!,
+  proxy: string = ADDR_ZERO,
   logic: string = CONTRACTS.get(contractName!)!.address.get(gNetwork.name!)!,
   logicCodeHash?: BytesLike,
   contractRegistry?: string | (IContractRegistry & Ownable)
@@ -186,17 +186,22 @@ export const register = async (
     ? logicCodeHash
     : keccak256(getArtifact(contractName).deployedBytecode);
 
-  const receipt = await (
-    await contractRegistry.register(
-      nameBytes,
-      proxy,
-      logic,
-      versionNumber,
-      logicCodeHash,
-      await adminAddr,
-      GAS_OPT.max
-    )
-  ).wait();
+  let receipt: ContractReceipt | undefined;
+  try {
+    receipt = await (
+      await contractRegistry.register(
+        nameBytes,
+        proxy,
+        logic,
+        versionNumber,
+        logicCodeHash,
+        await adminAddr,
+        GAS_OPT.max
+      )
+    ).wait();
+  } catch (error) {
+    throw new Error(`❌ 📄 In direct SC registering deployment in ContractRegistry. ${error}`);
+  }
 
   if (!receipt || !receipt.transactionHash) {
     throw new Error("ERROR: Transaction not executed, no valid receipt found");
@@ -311,6 +316,8 @@ export const deployWithContractDeployer = async (
       ? await getContractInstance<IContractDeployer>("ContractDeployer", deployer, contractDeployer)
       : contractDeployer;
   //* Actual deployment
+  const nameBytes = formatBytes32String(recordName);
+  const versionNumber = await versionDotToNum(version || "01.00");
   // encode contract deploy parameters | arguments
   const encodedArgs = new Interface(artifact.abi).encodeDeploy(args);
   // deploy
@@ -320,8 +327,8 @@ export const deployWithContractDeployer = async (
       artifact.bytecode,
       encodedArgs,
       new Uint8Array(32),
-      recordName,
-      version || "01.00",
+      nameBytes,
+      versionNumber,
       overrides || { ...GAS_OPT.max }
     )
   ).wait();
