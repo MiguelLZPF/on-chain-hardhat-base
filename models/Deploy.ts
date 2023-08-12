@@ -1,6 +1,10 @@
 import { ContractName, NetworkName } from "models/Configuration";
 import { Contract, BytesLike } from "ethers";
 import { ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
+import { IDecodedRecord } from "./StandardContractRegistry";
+
+// Where to store type
+export type WhereToStore = "onchain" | "offchain" | "both" | "Both" | "OnChain" | "OffChain";
 
 interface IDeployment {
   contractName: ContractName;
@@ -35,12 +39,14 @@ export interface INetworkDeployment {
 }
 
 export interface IDeployReturn {
-  deployment: IRegularDeployment;
+  deployment?: IRegularDeployment;
+  record?: IDecodedRecord;
   contractInstance: Contract;
 }
 
 export interface IUpgrDeployReturn extends Omit<IDeployReturn, "deployment"> {
-  deployment: IUpgradeDeployment;
+  deployment?: IUpgradeDeployment;
+  record?: IDecodedRecord;
   adminDeployment?: IRegularDeployment;
   logicInstance: Contract;
   tupInstance: TransparentUpgradeableProxy | Contract;
@@ -49,4 +55,11 @@ export interface IUpgrDeployReturn extends Omit<IDeployReturn, "deployment"> {
 
 export interface IUpgradeReturn extends Omit<IDeployReturn, "deployment"> {
   deployment: IUpgradeDeployment;
+}
+
+export interface IStorageOptions {
+  onChain: boolean;
+  offChain: boolean;
+  scr?: { version?: string; recordName?: string; contractRegistry?: string };
+  tag?: string;
 }

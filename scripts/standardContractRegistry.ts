@@ -1,14 +1,14 @@
-import { CONTRACTS, DEPLOY, GAS_OPT } from "configuration";
-import { gNetwork, gProvider, getArtifact, ghre } from "scripts/utils";
-import { Signer, Contract } from "ethers";
+import { CONTRACTS, GAS_OPT } from "configuration";
+import { ADDR_ZERO, gNetwork, gProvider, getArtifact, getContractInstance } from "scripts/utils";
+import { Signer, VoidSigner, PayableOverrides, Contract, ContractReceipt } from "ethers";
 import {
   isAddress,
   keccak256,
   formatBytes32String,
   parseBytes32String,
   BytesLike,
+  Interface,
 } from "ethers/lib/utils";
-import { JsonRpcProvider, Provider } from "@ethersproject/providers";
 import { IDecodedRecord } from "models/StandardContractRegistry";
 import { deployCodeTrust } from "./decentralizedCodeTrust";
 import { CodeTrust } from "node_modules/decentralized-code-trust/typechain-types";
@@ -16,11 +16,16 @@ import {
   ContractRegistry,
   ContractDeployer,
   IContractRegistry,
+  IContractDeployer,
+  IUpgradeableDeployer,
 } from "node_modules/standard-contract-registry/typechain-types";
-import { deploy } from "scripts/deploy";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { deploy, saveDeployment } from "scripts/deploy";
 import { ContractName } from "models/Configuration";
 import { ContractRecordStructOutput } from "standard-contract-registry/typechain-types/artifacts/contracts/interfaces/IContractRegistry";
+import { IDeployReturn, IRegularDeployment, IUpgrDeployReturn } from "models/Deploy";
+import { Ownable, ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
+
+export const MAX_VERSION = 9999;
 
 export const initialize = async (
   systemSigner: Signer,
@@ -29,52 +34,48 @@ export const initialize = async (
   existingContractRegistry?: string,
   existingContractDeployer?: string
 ) => {
-  let provider = systemSigner.provider ? systemSigner.provider : gProvider;
+  // check if systemSigner is connected
+  systemSigner = systemSigner.provider ? systemSigner : systemSigner.connect(gProvider);
+  //* Get instance or deploy contracts
   let codeTrust: CodeTrust;
+  let contractDeployer: ContractDeployer | undefined;
+  let contractRegistry: ContractRegistry;
   if (existingCodeTrust && isAddress(existingCodeTrust)) {
-    codeTrust = new Contract(
-      existingCodeTrust,
-      CONTRACTS.get("CodeTrust")!.artifact,
-      systemSigner
-    ) as CodeTrust;
+    codeTrust = await getContractInstance<CodeTrust>("CodeTrust", systemSigner, existingCodeTrust);
   } else {
     const result = await deployCodeTrust(systemSigner);
     codeTrust = result.contractInstance;
   }
-  let contractRegistry: ContractRegistry;
   if (existingContractRegistry && isAddress(existingContractRegistry)) {
-    contractRegistry = new Contract(
-      existingContractRegistry,
-      CONTRACTS.get("ContractRegistry")!.artifact,
-      systemSigner
-    ) as ContractRegistry;
-  } else {
-    const result = await deploy(
+    contractRegistry = await getContractInstance<ContractRegistry>(
       "ContractRegistry",
       systemSigner,
-      [codeTrust.address],
-      undefined,
-      undefined,
-      false
+      existingCodeTrust
     );
+  } else {
+    const result = await deploy("ContractRegistry", systemSigner, [codeTrust.address], undefined, {
+      offChain: false,
+      onChain: false,
+    });
     contractRegistry = result.contractInstance as ContractRegistry;
   }
-  let contractDeployer: ContractDeployer | undefined;
   if (deployContractDeployer) {
     if (existingContractDeployer && isAddress(existingContractDeployer)) {
-      contractDeployer = new Contract(
-        existingContractDeployer,
-        CONTRACTS.get("ContractDeployer")!.artifact,
-        systemSigner
-      ) as ContractDeployer;
+      contractDeployer = await getContractInstance<ContractDeployer>(
+        "ContractDeployer",
+        systemSigner,
+        existingCodeTrust
+      );
     } else {
       const result = await deploy(
         "ContractDeployer",
         systemSigner,
         [contractRegistry.address],
         undefined,
-        undefined,
-        false
+        {
+          offChain: false,
+          onChain: false,
+        }
       );
       contractDeployer = result.contractInstance as ContractDeployer;
     }
@@ -85,8 +86,8 @@ export const initialize = async (
     systemSigner,
     "CodeTrust",
     undefined,
-    undefined,
-    undefined,
+    codeTrust.address,
+    codeTrust.address,
     undefined,
     contractRegistry
   );
@@ -95,20 +96,19 @@ export const initialize = async (
     systemSigner,
     "ContractRegistry",
     undefined,
-    undefined,
-    undefined,
+    contractRegistry.address,
+    contractRegistry.address,
     undefined,
     contractRegistry
   );
-
   const deployerRecord = contractDeployer
     ? await register(
         "01.00",
         systemSigner,
         "ContractDeployer",
         undefined,
-        undefined,
-        undefined,
+        contractDeployer.address,
+        contractDeployer.address,
         undefined,
         contractRegistry
       )
@@ -125,31 +125,57 @@ export const initialize = async (
   }
 
   // Save ContractRegistry deploy information
-  const objectToSave = {
-    codeTrust: Object.fromEntries(Object.entries(codeTrustRecord)),
-    contractRegistry: Object.fromEntries(Object.entries(registryRecord)),
-    contractDeployer: deployerRecord
-      ? Object.fromEntries(Object.entries(deployerRecord))
+  const objectToSave: Array<IRegularDeployment | undefined> = [
+    {
+      contractName: codeTrustRecord.name as ContractName,
+      address: codeTrustRecord.logic,
+      byteCodeHash: codeTrustRecord.logicCodeHash,
+      deployTimestamp: codeTrustRecord.timestamp,
+      tag: "Miguel_LZPF",
+    },
+    {
+      contractName: registryRecord.name as ContractName,
+      address: registryRecord.logic,
+      byteCodeHash: registryRecord.logicCodeHash,
+      deployTimestamp: registryRecord.timestamp,
+      tag: "Miguel_LZPF",
+    },
+    contractDeployer
+      ? {
+          contractName: deployerRecord?.name as ContractName,
+          address: deployerRecord!.logic,
+          byteCodeHash: deployerRecord!.logicCodeHash,
+          deployTimestamp: deployerRecord!.timestamp,
+          tag: "Miguel_LZPF",
+        }
       : undefined,
-  };
-  writeFileSync(DEPLOY.deploymentsPath, JSON.stringify(objectToSave));
+  ];
+  // Actual write operation happens here
+  await saveDeployment(objectToSave[0]!),
+    await saveDeployment(objectToSave[1]!),
+    objectToSave[2] ? await saveDeployment(objectToSave[2]) : undefined;
+
   return objectToSave;
 };
 
-const register = async (
+export const register = async (
   version: string,
   admin: Signer,
   contractName?: ContractName,
   recordName: string = CONTRACTS.get(contractName!)!.name,
-  proxy: string = CONTRACTS.get(contractName!)!.address.get(gNetwork.name!)!,
+  proxy: string = ADDR_ZERO,
   logic: string = CONTRACTS.get(contractName!)!.address.get(gNetwork.name!)!,
   logicCodeHash?: BytesLike,
-  contractRegistry?: string | IContractRegistry
+  contractRegistry?: string | (IContractRegistry & Ownable)
 ) => {
   // check if admin is connected
   admin = admin.provider ? admin : admin.connect(gProvider);
   const adminAddr = admin.getAddress();
-  contractRegistry = await createRegistryInstance(contractRegistry, admin);
+  contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
+    "ContractRegistry",
+    admin,
+    contractRegistry
+  );
   const nameBytes = formatBytes32String(recordName);
   const versionNumber = await versionDotToNum(version);
   // Calculate the logicCodeHash if not given
@@ -158,48 +184,101 @@ const register = async (
   }
   logicCodeHash = logicCodeHash
     ? logicCodeHash
-    : keccak256((await getArtifact(contractName)).deployedBytecode);
+    : keccak256(getArtifact(contractName).deployedBytecode);
 
-  const receipt = await (
-    await contractRegistry.register(
-      nameBytes,
-      proxy,
-      logic,
-      versionNumber,
-      logicCodeHash,
-      await adminAddr,
-      GAS_OPT.max
-    )
-  ).wait();
+  let receipt: ContractReceipt | undefined;
+  try {
+    receipt = await (
+      await contractRegistry.register(
+        nameBytes,
+        proxy,
+        logic,
+        versionNumber,
+        logicCodeHash,
+        await adminAddr,
+        GAS_OPT.max
+      )
+    ).wait();
+  } catch (error) {
+    throw new Error(`❌ 📄 In direct SC registering deployment in ContractRegistry. ${error}`);
+  }
+
   if (!receipt || !receipt.transactionHash) {
     throw new Error("ERROR: Transaction not executed, no valid receipt found");
   }
   return await getRecord(recordName, await adminAddr, version, contractRegistry);
 };
 
-const getRecord = async (
+export const getRecords = async (
+  admin?: string,
+  contractRegistry?: string | (IContractRegistry & Ownable)
+) => {
+  contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
+    "ContractRegistry",
+    typeof contractRegistry != "string" ? contractRegistry?.provider : undefined,
+    contractRegistry
+  );
+  let latestRecordNames: string[];
+  let systemAdmin: Promise<string> | undefined;
+  if (admin) {
+    const signer = new VoidSigner(admin, contractRegistry.provider);
+    contractRegistry = contractRegistry.connect(signer);
+    latestRecordNames = await contractRegistry.getMyRecords();
+  } else {
+    systemAdmin = contractRegistry.owner();
+    latestRecordNames = await contractRegistry.getSystemRecords();
+  }
+  // Get all record results details in parallel
+  let latestRecordsResult: Promise<
+    [boolean, ContractRecordStructOutput] & { found: boolean; record: ContractRecordStructOutput }
+  >[] = [];
+  for (const recordName of latestRecordNames) {
+    latestRecordsResult.push(
+      contractRegistry.getRecord(recordName, (admin || (await systemAdmin))!, MAX_VERSION + 1)
+    );
+  }
+  // Check if all founded
+  for (const recordResult of await Promise.all(latestRecordsResult)) {
+    if (!recordResult.found) {
+      throw new Error(`Cannot find record: '${(await decodeRecord(recordResult.record)).name}'`);
+    }
+  }
+  // Decode all records in parallel for human readability
+  let latestRecords: Promise<IDecodedRecord>[] = [];
+  for (const recordResult of await Promise.all(latestRecordsResult)) {
+    latestRecords.push(decodeRecord(recordResult.record));
+  }
+  return await Promise.all(latestRecords);
+};
+
+export const getRecord = async (
   recordName: string,
   admin: string,
   version?: string,
-  contractRegistry?: string | IContractRegistry
+  contractRegistry?: string | (IContractRegistry & Ownable)
 ) => {
-  contractRegistry = await createRegistryInstance(
-    contractRegistry,
-    typeof contractRegistry != "string" ? contractRegistry?.provider : undefined
+  contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
+    "ContractRegistry",
+    typeof contractRegistry != "string" ? contractRegistry?.provider : undefined,
+    contractRegistry
   );
   const nameBytes = formatBytes32String(recordName);
   const versionNumber = version ? await versionDotToNum(version) : undefined;
 
-  const result = await contractRegistry.getRecord(nameBytes, admin, versionNumber || 10000);
+  const result = await contractRegistry.getRecord(
+    nameBytes,
+    admin,
+    versionNumber || MAX_VERSION + 1
+  );
   if (!result.found) {
     throw new Error(
       `ERROR: contract ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${admin}`
     );
   }
-  return { ...result.record };
+  return await decodeRecord(result.record);
 };
 
-const decodedRecord = async (record: ContractRecordStructOutput) => {
+const decodeRecord = async (record: ContractRecordStructOutput) => {
   return {
     name: parseBytes32String(record.name),
     proxy: record.proxy == record.logic ? undefined : record.proxy,
@@ -212,41 +291,133 @@ const decodedRecord = async (record: ContractRecordStructOutput) => {
   } as IDecodedRecord;
 };
 
-// UTILITY FUNCTIONS
-
-const createRegistryInstance = async (
-  registry?: IContractRegistry | string,
-  signerOrProvider: Signer | Provider | JsonRpcProvider = ghre.ethers.provider
-) => {
-  const contractRegistryArtifact = getArtifact("ContractRegistry");
-  if (registry && typeof registry == "string") {
-    // we have the registry address
-    registry = new Contract(
-      registry,
-      contractRegistryArtifact.abi,
-      signerOrProvider
-    ) as IContractRegistry;
-  } else if (registry) {
-    // we have the registry instance
-    registry = (registry as IContractRegistry).connect(signerOrProvider);
-  } else {
-    // no registry, use the deployment file
-    if (!existsSync(DEPLOY.deploymentsPath)) {
-      throw new Error(
-        `No ContractRegistry deployment file found. An initialization step is needed.`
-      );
-    }
-    const registryDeployment = JSON.parse(readFileSync(DEPLOY.deploymentsPath, "utf-8"));
-
-    registry = new Contract(
-      registryDeployment.contractRegistry.proxy,
-      contractRegistryArtifact.abi,
-      signerOrProvider
-    ) as IContractRegistry;
+export const deployWithContractDeployer = async (
+  contractName: ContractName,
+  recordName: string,
+  deployer: Signer,
+  args: unknown[] = [],
+  overrides?: PayableOverrides,
+  version?: string,
+  contractRegistry?: string | (IContractRegistry & Ownable),
+  contractDeployer?: string | IContractDeployer
+): Promise<IDeployReturn> => {
+  // check if deployer is connected to the provider
+  deployer = deployer.provider ? deployer : deployer.connect(gProvider);
+  // get the artifact of the contract name
+  const artifact = getArtifact(contractName);
+  // get the SCR Contract instances
+  contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
+    "ContractRegistry",
+    deployer,
+    contractRegistry
+  );
+  contractDeployer =
+    typeof contractDeployer === "string" || !contractDeployer
+      ? await getContractInstance<IContractDeployer>("ContractDeployer", deployer, contractDeployer)
+      : contractDeployer;
+  //* Actual deployment
+  const nameBytes = formatBytes32String(recordName);
+  const versionNumber = await versionDotToNum(version || "01.00");
+  // encode contract deploy parameters | arguments
+  const encodedArgs = new Interface(artifact.abi).encodeDeploy(args);
+  // deploy
+  const receipt = await (
+    await contractDeployer.deployContract(
+      contractRegistry.address || ADDR_ZERO,
+      artifact.bytecode,
+      encodedArgs,
+      new Uint8Array(32),
+      nameBytes,
+      versionNumber,
+      overrides || { ...GAS_OPT.max }
+    )
+  ).wait();
+  if (!receipt) {
+    throw new Error(`Error in contract deployment. Receipt undefined.`);
   }
-  return registry;
+  const newRecord = await getRecord(
+    recordName,
+    await deployer.getAddress(),
+    version,
+    contractRegistry
+  );
+  console.log(`
+    Regular contract deployed:
+      - Address: ${newRecord.logic}
+      - Arguments: ${args}`);
+  return {
+    record: newRecord,
+    contractInstance: await getContractInstance(contractName, deployer, newRecord.logic),
+  };
 };
 
+export const deployWithUpgrDeployer = async (
+  contractName: ContractName,
+  recordName: string,
+  deployer: Signer,
+  args: unknown[] = [],
+  overrides?: PayableOverrides,
+  version?: string,
+  contractRegistry?: string | (IContractRegistry & Ownable),
+  upgradeableDeployer?: string | (IUpgradeableDeployer & ProxyAdmin)
+): Promise<IUpgrDeployReturn> => {
+  // check if deployer is connected to the provider
+  deployer = deployer.provider ? deployer : deployer.connect(gProvider);
+  // get the artifact of the contract name
+  const artifact = getArtifact(contractName);
+  // get the SCR Contract instances
+  contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
+    "ContractRegistry",
+    deployer,
+    contractRegistry
+  );
+  upgradeableDeployer = await getContractInstance<IUpgradeableDeployer & ProxyAdmin>(
+    "UpgradeableDeployer",
+    deployer,
+    upgradeableDeployer
+  );
+  //* Actual deployment
+  // encode contract deploy parameters | arguments
+  const encodedArgs = new Interface(artifact.abi).encodeDeploy(args);
+  // deploy
+  const receipt = await (
+    await upgradeableDeployer.deployContract(
+      contractRegistry.address || ADDR_ZERO,
+      artifact.bytecode,
+      encodedArgs,
+      new Uint8Array(32),
+      recordName,
+      version || "01.00",
+      overrides || { ...GAS_OPT.max }
+    )
+  ).wait();
+  if (!receipt) {
+    throw new Error(`Error in contract deployment. Receipt undefined.`);
+  }
+  const newRecord = await getRecord(
+    recordName,
+    await deployer.getAddress(),
+    version,
+    contractRegistry
+  );
+  console.log(`
+    Upgradeable contract deployed:
+      - Address: ${newRecord.logic}
+      - Arguments: ${args}`);
+  return {
+    record: newRecord,
+    proxyAdminInstance: upgradeableDeployer as ProxyAdmin,
+    tupInstance: await getContractInstance<TransparentUpgradeableProxy>(
+      "TUP",
+      deployer,
+      newRecord.proxy!
+    ),
+    logicInstance: await getContractInstance<Contract>(contractName, deployer, newRecord.logic!),
+    contractInstance: await getContractInstance<Contract>(contractName, deployer, newRecord.proxy!),
+  };
+};
+
+// UTILITY FUNCTIONS
 export const versionNumToDot = async (versionNum: number) => {
   const versionString = versionNum.toString();
   const zeroPad = "000";
