@@ -100,6 +100,17 @@ export interface IRegister extends ISignerInformation {
   contractRegistry?: string | (IContractRegistry & Ownable);
 }
 
+export interface IUpdate extends ISignerInformation {
+  recordVersion: string;
+  contractName?: ContractName;
+  recordName?: string;
+  proxy?: string;
+  logic?: string;
+  newAdmin?: string;
+  logicCodeHash?: BytesLike;
+  contractRegistry?: string | (IContractRegistry & Ownable);
+}
+
 export interface IGetRecord extends ISignerInformation {
   recordName: string;
   admin?: string;

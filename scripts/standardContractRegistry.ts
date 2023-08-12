@@ -209,6 +209,60 @@ export const register = async (
   return await getRecord(recordName, await adminAddr, version, contractRegistry);
 };
 
+export const update = async (
+  version: string,
+  admin: Signer,
+  contractName?: ContractName,
+  recordName: string = CONTRACTS.get(contractName!)!.name,
+  proxy: string = ADDR_ZERO,
+  logic: string = CONTRACTS.get(contractName!)!.address.get(gNetwork.name!)!,
+  newAdmin: string = ADDR_ZERO,
+  logicCodeHash?: BytesLike,
+  contractRegistry?: string | (IContractRegistry & Ownable)
+) => {
+  // check if admin is connected
+  admin = admin.provider ? admin : admin.connect(gProvider);
+  const adminAddr = admin.getAddress();
+  const actualRecord = getRecord(recordName, await adminAddr, undefined, contractRegistry);
+  contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
+    "ContractRegistry",
+    admin,
+    contractRegistry
+  );
+  const nameBytes = formatBytes32String(recordName);
+  const versionNumber = versionDotToNum(version);
+  // Calculate the logicCodeHash if not given
+  if (!logicCodeHash && !contractName) {
+    throw new Error(`No logicCodeHash provided and no recordName to calculate it`);
+  }
+  logicCodeHash = logicCodeHash
+    ? logicCodeHash
+    : keccak256(getArtifact(contractName).deployedBytecode);
+
+  let receipt: ContractReceipt | undefined;
+  try {
+    receipt = await (
+      await contractRegistry.update(
+        nameBytes,
+        proxy,
+        logic,
+        newAdmin,
+        await versionNumber,
+        logicCodeHash,
+        await adminAddr,
+        GAS_OPT.max
+      )
+    ).wait();
+  } catch (error) {
+    throw new Error(`❌ 📄 In direct SC registering deployment in ContractRegistry. ${error}`);
+  }
+
+  if (!receipt || !receipt.transactionHash) {
+    throw new Error("ERROR: Transaction not executed, no valid receipt found");
+  }
+  return await getRecord(recordName, await adminAddr, version, contractRegistry);
+};
+
 export const getRecords = async (
   admin?: string,
   contractRegistry?: string | (IContractRegistry & Ownable)
