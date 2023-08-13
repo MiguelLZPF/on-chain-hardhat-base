@@ -215,7 +215,9 @@ export const update = async (
   contractName?: ContractName,
   recordName: string = CONTRACTS.get(contractName!)!.name,
   proxy: string = ADDR_ZERO,
-  logic: string = CONTRACTS.get(contractName!)!.address.get(gNetwork.name!)!,
+  logic: string = contractName
+    ? CONTRACTS.get(contractName)?.address.get(gNetwork.name) || ADDR_ZERO
+    : ADDR_ZERO,
   newAdmin: string = ADDR_ZERO,
   logicCodeHash?: BytesLike,
   contractRegistry?: string | (IContractRegistry & Ownable)
@@ -223,6 +225,7 @@ export const update = async (
   // check if admin is connected
   admin = admin.provider ? admin : admin.connect(gProvider);
   const adminAddr = admin.getAddress();
+  // (async) get record before updating
   const actualRecord = getRecord(recordName, await adminAddr, undefined, contractRegistry);
   contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
     "ContractRegistry",
@@ -230,7 +233,20 @@ export const update = async (
     contractRegistry
   );
   const nameBytes = formatBytes32String(recordName);
-  const versionNumber = versionDotToNum(version);
+  const versionNumber = await versionDotToNum(version);
+  //* Same checks that in the smart contract
+  if (versionNumber > MAX_VERSION) {
+    throw new Error(`❌ Version must be lower than ${MAX_VERSION}`);
+  }
+  if (versionNumber < (await versionDotToNum((await actualRecord).version))) {
+    throw new Error(
+      `❌ New Version(${versionNumber}) must be higher than than actual version (${await versionDotToNum(
+        (
+          await actualRecord
+        ).version
+      )})`
+    );
+  }
   // Calculate the logicCodeHash if not given
   if (!logicCodeHash && !contractName) {
     throw new Error(`No logicCodeHash provided and no recordName to calculate it`);
@@ -247,7 +263,7 @@ export const update = async (
         proxy,
         logic,
         newAdmin,
-        await versionNumber,
+        versionNumber,
         logicCodeHash,
         await adminAddr,
         GAS_OPT.max
@@ -256,11 +272,13 @@ export const update = async (
   } catch (error) {
     throw new Error(`❌ 📄 In direct SC registering deployment in ContractRegistry. ${error}`);
   }
-
   if (!receipt || !receipt.transactionHash) {
-    throw new Error("ERROR: Transaction not executed, no valid receipt found");
+    throw new Error("❌ ⛓️ Transaction not executed, no valid receipt found");
   }
-  return await getRecord(recordName, await adminAddr, version, contractRegistry);
+  return {
+    previous: await actualRecord,
+    new: await getRecord(recordName, await adminAddr, version, contractRegistry),
+  };
 };
 
 export const getRecords = async (
@@ -326,7 +344,7 @@ export const getRecord = async (
   );
   if (!result.found) {
     throw new Error(
-      `ERROR: contract ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${admin}`
+      `❌ 🔎 Contract record ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${admin}`
     );
   }
   return await decodeRecord(result.record);

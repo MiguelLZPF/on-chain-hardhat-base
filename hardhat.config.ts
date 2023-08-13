@@ -944,7 +944,7 @@ task(
   "scr-update",
   "Update a Contract Record in Contract Registry with Standard Contract Registry model at '--network'"
 )
-  .addParam("recordVersion", "Initial version to be assigned to this contract record")
+  .addParam("recordVersion", "New version to be assigned to this contract record")
   .addOptionalParam("contractName", "Name of the contract to use", undefined, types.string)
   .addOptionalParam(
     "recordName",
@@ -1025,7 +1025,7 @@ task(
       mnemonicLocale: args.mnemonicLocale,
     } as ISignerInformation);
 
-    await update(
+    const result = await update(
       args.recordVersion,
       wallet,
       args.contractName,
@@ -1036,6 +1036,19 @@ task(
       args.logicCodeHash,
       args.contractRegistry
     );
+    //* Print Result on screen
+    console.log(`
+        ✅ 🎉 Contract record updated succesfully! Update information:
+          - Contract Name (id within this project): ${args.contractName}
+          - Record Name (id within the Contract Registry): ${result.new.name}
+          - Logic Address (the only one if regular deployment): ${result.new.logic} (Previous: ${result.previous.logic})
+          - Proxy Address (only if upgradeable deployment): ${result.new.proxy} (Previous: ${result.previous.proxy})
+          - Admin: ${result.new.admin} (Previous: ${result.previous.admin})
+          - Deploy Timestamp: ${result.new.timestamp} (Previous: ${result.previous.timestamp})
+          - Bytecode Hash: ${result.new.logicCodeHash} (Previous: ${result.previous.logicCodeHash})
+          - Version: ${result.new.version} (Previous: ${result.previous.version})
+          - Extra data: ${result.new.extraData} (Previous: ${result.previous.extraData})
+      `);
   });
 
 task(
