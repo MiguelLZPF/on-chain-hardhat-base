@@ -24,7 +24,7 @@ import { PromiseOrValue } from "typechain-types/common";
 import { Ownable, ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
 import { readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import { ContractName } from "models/Configuration";
-import { getRecord, register } from "./standardContractRegistry";
+import { getRecord, register, update } from "./standardContractRegistry";
 import { IDecodedRecord } from "models/StandardContractRegistry";
 import { IContractRegistry } from "standard-contract-registry/typechain-types";
 
@@ -54,6 +54,7 @@ export const deploy = async (
 ): Promise<IDeployReturn> => {
   // check if deployer is connected to the provider
   deployer = deployer.provider ? deployer : deployer.connect(gProvider);
+  const deployerAddr = deployer.getAddress();
   // (async) get Contract Registry instance
   const contractRegistry = getContractInstance<IContractRegistry & Ownable>(
     "ContractRegistry",
@@ -85,7 +86,9 @@ export const deploy = async (
   // if off chain file store
   storageOpt.offChain ? await saveDeployment(deployment) : undefined;
   // if on chain record store
-  let newRecord: IDecodedRecord | undefined;
+  let newRecord, actualRecord: IDecodedRecord | undefined;
+  // flag to know if contract record has been updated
+  let updated = false;
   if (storageOpt.onChain) {
     // check default values
     storageOpt.scr = storageOpt.scr || {
@@ -98,23 +101,57 @@ export const deploy = async (
     storageOpt.scr.contractRegistry =
       storageOpt.scr.contractRegistry || (await contractRegistry).address;
     try {
-      await register(
-        storageOpt.scr.version,
-        deployer,
-        contractName,
+      actualRecord = await getRecord(
         storageOpt.scr.recordName,
+        await deployerAddr,
         undefined,
-        contract.address,
-        byteCodeHash,
-        await contractRegistry
+        storageOpt.scr.contractRegistry
       );
     } catch (error) {
-      throw new Error(`❌ Registering deployment in ContractRegistry. ${error}`);
+      console.error(
+        `❌ Error retreiving record deployment before changes in ContractRegistry. ${error}`
+      );
     }
+    if (actualRecord && actualRecord.version < storageOpt.scr.version) {
+      // update if already registered
+      try {
+        await update(
+          storageOpt.scr.version,
+          deployer,
+          contractName,
+          storageOpt.scr.recordName,
+          undefined,
+          contract.address,
+          undefined,
+          byteCodeHash,
+          await contractRegistry
+        );
+        updated = true;
+      } catch (error) {
+        throw new Error(`❌ Registering deployment in ContractRegistry. ${error}`);
+      }
+    } else {
+      // register otherwise
+      try {
+        await register(
+          storageOpt.scr.version,
+          deployer,
+          contractName,
+          storageOpt.scr.recordName,
+          undefined,
+          contract.address,
+          byteCodeHash,
+          await contractRegistry
+        );
+      } catch (error) {
+        throw new Error(`❌ Registering deployment in ContractRegistry. ${error}`);
+      }
+    }
+
     try {
       newRecord = await getRecord(
         storageOpt.scr.recordName,
-        await deployer.getAddress(),
+        await deployerAddr,
         storageOpt.scr.version,
         storageOpt.scr.contractRegistry
       );
@@ -125,6 +162,7 @@ export const deploy = async (
   return {
     deployment: storageOpt.offChain ? deployment : undefined,
     record: storageOpt.onChain ? newRecord : undefined,
+    recordUpdated: updated,
     contractInstance: contract,
   };
 };

@@ -41,6 +41,8 @@ export interface INetworkDeployment {
 export interface IDeployReturn {
   deployment?: IRegularDeployment;
   record?: IDecodedRecord;
+  recordUpdated?: boolean;
+  previousRecord?: IDecodedRecord;
   contractInstance: Contract;
 }
 

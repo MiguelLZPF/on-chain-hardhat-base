@@ -24,6 +24,7 @@ import { ContractName } from "models/Configuration";
 import { ContractRecordStructOutput } from "standard-contract-registry/typechain-types/artifacts/contracts/interfaces/IContractRegistry";
 import { IDeployReturn, IRegularDeployment, IUpgrDeployReturn } from "models/Deploy";
 import { Ownable, ProxyAdmin, TransparentUpgradeableProxy } from "typechain-types";
+import { PromiseOrValue } from "typechain-types/common";
 
 export const MAX_VERSION = 9999;
 
@@ -226,7 +227,12 @@ export const update = async (
   admin = admin.provider ? admin : admin.connect(gProvider);
   const adminAddr = admin.getAddress();
   // (async) get record before updating
-  const actualRecord = getRecord(recordName, await adminAddr, undefined, contractRegistry);
+  let actualRecord: PromiseOrValue<IDecodedRecord | undefined> = getRecord(
+    recordName,
+    await adminAddr,
+    undefined,
+    contractRegistry
+  );
   contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
     "ContractRegistry",
     admin,
@@ -235,16 +241,18 @@ export const update = async (
   const nameBytes = formatBytes32String(recordName);
   const versionNumber = await versionDotToNum(version);
   //* Same checks that in the smart contract
-  if (versionNumber > MAX_VERSION) {
-    throw new Error(`❌ Version must be lower than ${MAX_VERSION}`);
+  if (!(versionNumber <= MAX_VERSION)) {
+    throw new Error(`❌ Version must be lower than ${await versionNumToDot(MAX_VERSION)}`);
   }
-  if (versionNumber < (await versionDotToNum((await actualRecord).version))) {
+  actualRecord = await actualRecord;
+  if (!actualRecord || !actualRecord.version) {
     throw new Error(
-      `❌ New Version(${versionNumber}) must be higher than than actual version (${await versionDotToNum(
-        (
-          await actualRecord
-        ).version
-      )})`
+      `❌ 🔎 Contract record ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${adminAddr}`
+    );
+  }
+  if (!((await versionDotToNum(actualRecord.version)) < versionNumber)) {
+    throw new Error(
+      `❌ New Version(${versionNumber}) must be higher than than actual version(${actualRecord.version})`
     );
   }
   // Calculate the logicCodeHash if not given
@@ -275,9 +283,15 @@ export const update = async (
   if (!receipt || !receipt.transactionHash) {
     throw new Error("❌ ⛓️ Transaction not executed, no valid receipt found");
   }
+  const newRecord = await getRecord(recordName, await adminAddr, version, contractRegistry);
+  if (!newRecord) {
+    throw new Error(
+      `❌ 🔎 Contract record ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${adminAddr}`
+    );
+  }
   return {
-    previous: await actualRecord,
-    new: await getRecord(recordName, await adminAddr, version, contractRegistry),
+    previous: actualRecord,
+    new: newRecord,
   };
 };
 
@@ -343,9 +357,7 @@ export const getRecord = async (
     versionNumber || MAX_VERSION + 1
   );
   if (!result.found) {
-    throw new Error(
-      `❌ 🔎 Contract record ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${admin}`
-    );
+    return undefined;
   }
   return await decodeRecord(result.record);
 };
@@ -375,8 +387,18 @@ export const deployWithContractDeployer = async (
 ): Promise<IDeployReturn> => {
   // check if deployer is connected to the provider
   deployer = deployer.provider ? deployer : deployer.connect(gProvider);
+  const adminAddr = deployer.getAddress();
   // get the artifact of the contract name
   const artifact = getArtifact(contractName);
+  // (async) get record before updating
+  let actualRecord: PromiseOrValue<IDecodedRecord | undefined> = getRecord(
+    recordName,
+    await adminAddr,
+    undefined,
+    contractRegistry
+  );
+  // flag to mark if contract record has been updated
+  let updated = false;
   // get the SCR Contract instances
   contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
     "ContractRegistry",
@@ -392,7 +414,22 @@ export const deployWithContractDeployer = async (
   const versionNumber = await versionDotToNum(version || "01.00");
   // encode contract deploy parameters | arguments
   const encodedArgs = new Interface(artifact.abi).encodeDeploy(args);
-  // deploy
+  //* Same checks that in the smart contract
+  if (!(versionNumber <= MAX_VERSION)) {
+    throw new Error(`❌ Version must be lower than ${await versionNumToDot(MAX_VERSION)}`);
+  }
+  actualRecord = await actualRecord;
+  if (
+    actualRecord &&
+    actualRecord.version &&
+    !((await versionDotToNum(actualRecord.version)) < versionNumber)
+  ) {
+    throw new Error(
+      `❌ New Version(${version}) must be higher than than actual version(${actualRecord.version})`
+    );
+  }
+  updated = true;
+  // deploy and (register or update)
   const receipt = await (
     await contractDeployer.deployContract(
       contractRegistry.address || ADDR_ZERO,
@@ -407,18 +444,16 @@ export const deployWithContractDeployer = async (
   if (!receipt) {
     throw new Error(`Error in contract deployment. Receipt undefined.`);
   }
-  const newRecord = await getRecord(
-    recordName,
-    await deployer.getAddress(),
-    version,
-    contractRegistry
-  );
-  console.log(`
-    Regular contract deployed:
-      - Address: ${newRecord.logic}
-      - Arguments: ${args}`);
+  const newRecord = await getRecord(recordName, await adminAddr, version, contractRegistry);
+  if (!newRecord) {
+    throw new Error(
+      `❌ 🔎 Contract record ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${adminAddr}`
+    );
+  }
   return {
     record: newRecord,
+    recordUpdated: updated,
+    previousRecord: actualRecord,
     contractInstance: await getContractInstance(contractName, deployer, newRecord.logic),
   };
 };
@@ -435,6 +470,7 @@ export const deployWithUpgrDeployer = async (
 ): Promise<IUpgrDeployReturn> => {
   // check if deployer is connected to the provider
   deployer = deployer.provider ? deployer : deployer.connect(gProvider);
+  const adminAddr = deployer.getAddress();
   // get the artifact of the contract name
   const artifact = getArtifact(contractName);
   // get the SCR Contract instances
@@ -466,16 +502,12 @@ export const deployWithUpgrDeployer = async (
   if (!receipt) {
     throw new Error(`Error in contract deployment. Receipt undefined.`);
   }
-  const newRecord = await getRecord(
-    recordName,
-    await deployer.getAddress(),
-    version,
-    contractRegistry
-  );
-  console.log(`
-    Upgradeable contract deployed:
-      - Address: ${newRecord.logic}
-      - Arguments: ${args}`);
+  const newRecord = await getRecord(recordName, await adminAddr, version, contractRegistry);
+  if (!newRecord) {
+    throw new Error(
+      `❌ 🔎 Contract record ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${adminAddr}`
+    );
+  }
   return {
     record: newRecord,
     proxyAdminInstance: upgradeableDeployer as ProxyAdmin,

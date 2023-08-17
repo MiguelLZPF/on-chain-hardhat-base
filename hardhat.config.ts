@@ -501,23 +501,26 @@ task("deploy", "Deploy smart contracts on '--network'")
     }
     //* Print Result on screen
     console.log(`
-        ✅ 🎉 Contract deployed successfully! Contract Information:
-          - Contract Name (id within this project): ${args.contractName}
-          - Record Name (id within the Contract Registry): ${args.recordName}
-          - Logic Address (the only one if regular deployment): ${
-            (result.deployment as IRegularDeployment)?.address ||
-            (result.deployment as unknown as IUpgradeDeployment)?.logic ||
-            result.record?.logic
-          }
-          - Proxy Address (only if upgradeable deployment): ${
-            (result.deployment as unknown as IUpgradeDeployment)?.proxy || result.record?.proxy
-          }
-          - Admin or Deployer: ${wallet.address}
-          - Deploy Timestamp: ${result.deployment?.deployTimestamp || result.record?.timestamp}
-          - Bytecode Hash: ${result.deployment?.byteCodeHash || result.record?.logicCodeHash}
-          - Version (only if ContractRegistry): ${result.record?.version}
-          - Tag or extra data: ${args.tag || result.record?.extraData}
-      `);
+      ${result.recordUpdated ? "🔄 📄 Record has been updated!" : undefined} 
+      ✅ 🎉 Contract deployed successfully! Contract Information:
+        - Contract Name (id within this project): ${args.contractName}
+        - Record Name (id within the Contract Registry): ${args.recordName}
+        - Logic Address (the only one if regular deployment): ${
+          (result.deployment as IRegularDeployment)?.address ||
+          (result.deployment as unknown as IUpgradeDeployment)?.logic ||
+          result.record?.logic
+        } ${result.previousRecord ? `(Previous: ${result.previousRecord.logic})` : ""}
+        - Proxy Address (only if upgradeable deployment): ${
+          (result.deployment as unknown as IUpgradeDeployment)?.proxy || result.record?.proxy
+        }
+        - Admin or Deployer: ${wallet.address}
+        - Deploy Timestamp: ${result.deployment?.deployTimestamp || result.record?.timestamp}
+        - Bytecode Hash: ${result.deployment?.byteCodeHash || result.record?.logicCodeHash}
+        - Version (only if ContractRegistry): ${result.record?.version} ${
+      result.previousRecord ? `(Previous: ${result.previousRecord?.version}` : ""
+    })
+        - Tag or extra data: ${args.tag || result.record?.extraData}
+    `);
   });
 
 task("upgrade", "Upgrade smart contracts on '--network'")
@@ -1042,7 +1045,7 @@ task(
           - Contract Name (id within this project): ${args.contractName}
           - Record Name (id within the Contract Registry): ${result.new.name}
           - Logic Address (the only one if regular deployment): ${result.new.logic} (Previous: ${result.previous.logic})
-          - Proxy Address (only if upgradeable deployment): ${result.new.proxy} (Previous: ${result.previous.proxy})
+          - Proxy Address (only if upgradeable deployment): ${result.new.proxy}
           - Admin: ${result.new.admin} (Previous: ${result.previous.admin})
           - Deploy Timestamp: ${result.new.timestamp} (Previous: ${result.previous.timestamp})
           - Bytecode Hash: ${result.new.logicCodeHash} (Previous: ${result.previous.logicCodeHash})
