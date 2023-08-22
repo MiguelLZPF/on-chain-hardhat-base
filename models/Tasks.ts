@@ -53,14 +53,9 @@ export interface IDeploy extends ISignerInformation {
   upgradeableDeployer?: string;
 }
 
-export interface IUpgrade extends ISignerInformation {
-  contractName: ContractName;
-  proxy: string;
-  proxyAdmin?: string;
-  contractArgs: any;
-  initialize?: boolean;
-  tag?: string;
-  noCompile: boolean;
+export interface IUpgrade
+  extends Omit<IDeploy, "upgradeable" | "contractDeployer" | "upgradeableDeployer"> {
+  proxy?: string;
 }
 
 export interface ICallContract extends ISignerInformation {

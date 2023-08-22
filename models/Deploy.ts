@@ -55,10 +55,6 @@ export interface IUpgrDeployReturn extends Omit<IDeployReturn, "deployment"> {
   proxyAdminInstance?: ProxyAdmin;
 }
 
-export interface IUpgradeReturn extends Omit<IDeployReturn, "deployment"> {
-  deployment: IUpgradeDeployment;
-}
-
 export interface IStorageOptions {
   onChain: boolean;
   offChain: boolean;
