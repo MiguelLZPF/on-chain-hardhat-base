@@ -41,6 +41,8 @@ export interface INetworkDeployment {
 export interface IDeployReturn {
   deployment?: IRegularDeployment;
   record?: IDecodedRecord;
+  recordUpdated?: boolean;
+  previousRecord?: IDecodedRecord;
   contractInstance: Contract;
 }
 
@@ -51,10 +53,6 @@ export interface IUpgrDeployReturn extends Omit<IDeployReturn, "deployment"> {
   logicInstance: Contract;
   tupInstance: TransparentUpgradeableProxy | Contract;
   proxyAdminInstance?: ProxyAdmin;
-}
-
-export interface IUpgradeReturn extends Omit<IDeployReturn, "deployment"> {
-  deployment: IUpgradeDeployment;
 }
 
 export interface IStorageOptions {
