@@ -1007,7 +1007,7 @@ task(
       mnemonicLocale: args.mnemonicLocale,
     } as ISignerInformation);
 
-    await register(
+    const result = await register(
       args.recordVersion,
       wallet,
       args.contractName,
@@ -1016,6 +1016,17 @@ task(
       args.logic,
       args.logicCodeHash,
       args.contractRegistry
+    );
+    console.info(
+      "✅ 🎉 Contract Record registered successfully! Contract Record:",
+      `\n  - Contract Name (id within this project): ${args.contractName}`,
+      `\n  - Record Name (id within the Contract Registry): ${args.recordName}`,
+      `\n  - Logic Address (the only one if regular deployment): ${result?.logic}`,
+      `\n  - Proxy Address (only if upgradeable deployment): ${result?.proxy}`,
+      `\n  - Admin or Deployer: ${wallet.address}`,
+      `\n  - Deploy Timestamp: ${result?.timestamp}`,
+      `\n  - Bytecode Hash: ${result?.logicCodeHash}`,
+      `\n  - Version (only if ContractRegistry): ${result?.version}`
     );
   });
 
@@ -1116,18 +1127,18 @@ task(
       args.contractRegistry
     );
     //* Print Result on screen
-    console.log(`
-        ✅ 🎉 Contract record updated succesfully! Update information:
-          - Contract Name (id within this project): ${args.contractName}
-          - Record Name (id within the Contract Registry): ${result.new.name}
-          - Logic Address (the only one if regular deployment): ${result.new.logic} (Previous: ${result.previous.logic})
-          - Proxy Address (only if upgradeable deployment): ${result.new.proxy}
-          - Admin: ${result.new.admin} (Previous: ${result.previous.admin})
-          - Deploy Timestamp: ${result.new.timestamp} (Previous: ${result.previous.timestamp})
-          - Bytecode Hash: ${result.new.logicCodeHash} (Previous: ${result.previous.logicCodeHash})
-          - Version: ${result.new.version} (Previous: ${result.previous.version})
-          - Extra data: ${result.new.extraData} (Previous: ${result.previous.extraData})
-      `);
+    console.info(
+      "✅ 🎉 Contract record updated succesfully! Update information:",
+      `\n  - Contract Name (id within this project): ${args.contractName}`,
+      `\n  - Record Name (id within the Contract Registry): ${result.new.name}`,
+      `\n  - Logic Address (the only one if regular deployment): ${result.new.logic} (Previous: ${result.previous.logic})`,
+      `\n  - Proxy Address (only if upgradeable deployment): ${result.new.proxy}`,
+      `\n  - Admin: ${result.new.admin} (Previous: ${result.previous.admin})`,
+      `\n  - Deploy Timestamp: ${result.new.timestamp} (Previous: ${result.previous.timestamp})`,
+      `\n  - Bytecode Hash: ${result.new.logicCodeHash} (Previous: ${result.previous.logicCodeHash})`,
+      `\n  - Version: ${result.new.version} (Previous: ${result.previous.version})`,
+      `\n  - Extra data: ${result.new.extraData} (Previous: ${result.previous.extraData})`
+    );
   });
 
 task(
@@ -1210,11 +1221,31 @@ task(
       ).address;
     }
     if (!args.admin) {
-      throw new Error("Admin or signer information needed to recover Contract Record");
+      throw new Error("❌ 🔑 Admin or signer information needed to recover Contract Record");
     }
-    console.log(
-      await getRecord(args.recordName, args.admin, args.recordVersion, args.contractRegistry)
+    const result = await getRecord(
+      args.recordName,
+      args.admin,
+      args.recordVersion,
+      args.contractRegistry
     );
+    if (result && result.name) {
+      console.info(
+        `✅ 📄 Contract Record successfully retrieved:`,
+        `\n  - Name: ${result.name}`,
+        `\n  - Proxy: ${result.proxy}`,
+        `\n  - Logic: ${result.logic}`,
+        `\n  - Version: ${result.version}`,
+        `\n  - Admin: ${result.admin}`,
+        `\n  - Logic code hash: ${result.logicCodeHash}`,
+        `\n  - Extra Data: ${result.extraData}`,
+        `\n  - Time Stamp: ${result.timestamp}`
+      );
+    } else {
+      throw new Error(
+        `❌ 🔎 Not Found. Record ${args.recordName} not found in ${args.contractRegistry} for ${args.admin}`
+      );
+    }
   });
 
 task(
@@ -1285,7 +1316,14 @@ task(
         } as ISignerInformation)) as Wallet
       ).address;
     }
-    console.log(await getRecords(args.admin, args.contractRegistry));
+    const result = await getRecords(args.admin, args.contractRegistry);
+    if (result && result.length > 0) {
+      console.info(`✅ 📄 Contract Records successfully retrieved:\n`, result);
+    } else {
+      throw new Error(
+        `❌ 🔎 Not Found. Records not found in ${args.contractRegistry} for ${args.admin}`
+      );
+    }
   });
 // OTHER
 task("get-timestamp", "get the current timestamp in seconds")
