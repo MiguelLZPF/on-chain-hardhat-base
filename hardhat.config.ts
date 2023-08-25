@@ -34,6 +34,7 @@ import {
   initialize,
   register,
   update,
+  upgradeWithUpgrDeployer,
 } from "scripts/standardContractRegistry";
 import { network } from "hardhat";
 import {
@@ -279,7 +280,12 @@ task("get-mnemonic", "Recover mnemonic phrase from an encrypted wallet")
 // DEPLOYMENTS
 task("deploy", "Deploy smart contracts on '--network'")
   .addFlag("upgradeable", "Deploy as upgradeable")
-  .addPositionalParam("contractName", "Name of the contract to deploy", undefined, types.string)
+  .addPositionalParam(
+    "contractName",
+    "Name of the contract to upgrade (main use: get factory)",
+    undefined,
+    types.string
+  )
   .addOptionalParam(
     "proxyAdmin",
     "(Optional) [First found in deployments file] Address of a deloyed Proxy Admin. Only if --upgradeable deployment",
@@ -542,7 +548,7 @@ task("upgrade", "Upgrade smart contracts on '--network'")
   )
   .addOptionalParam(
     "contractArgs",
-    "Contract initialize function's arguments if any",
+    "(Optional) [undefined] Contract initialize function's arguments if any",
     undefined,
     types.string
   )
@@ -573,6 +579,12 @@ task("upgrade", "Upgrade smart contracts on '--network'")
   .addOptionalParam(
     "contractRegistry",
     "(Optional) [CONTRCTS.contractRegistry] Contract Registry to use. If undefined use default. Only if storeOnChain is true",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "upgradeableDeployer",
+    "(Optional) [undefined] Upgradeable Deployer to use for deploying the contract. Use 'default' keyword to use default one from config or deployments file.",
     undefined,
     types.string
   )
@@ -637,25 +649,39 @@ task("upgrade", "Upgrade smart contracts on '--network'")
       mnemonicPath: args.mnemonicPath,
       mnemonicLocale: args.mnemonicLocale,
     } as ISignerInformation);
-    const result = await upgrade(
-      args.contractName,
-      wallet,
-      args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
-      args.proxy,
-      undefined,
-      args.proxyAdmin,
-      args.initialize || false,
-      {
-        offChain: args.storeOffChain || false,
-        onChain: args.storeOnChain || true,
-        scr: {
-          recordName: args.recordName,
-          version: args.recordVersion,
-          contractRegistry: args.contractRegistry,
-        },
-        tag: args.tag,
-      }
-    );
+    let result: IUpgrDeployReturn;
+    if (args.upgradeableDeployer) {
+      result = await upgradeWithUpgrDeployer(
+        args.contractName,
+        args.recordName || args.contractName,
+        wallet,
+        args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+        undefined,
+        args.recordVersion,
+        args.contractRegistry,
+        args.upgradeableDeployer
+      );
+    } else {
+      result = await upgrade(
+        args.contractName,
+        wallet,
+        args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+        args.proxy,
+        undefined,
+        args.proxyAdmin,
+        args.initialize || false,
+        {
+          offChain: args.storeOffChain || false,
+          onChain: args.storeOnChain || true,
+          scr: {
+            recordName: args.recordName,
+            version: args.recordVersion,
+            contractRegistry: args.contractRegistry,
+          },
+          tag: args.tag,
+        }
+      );
+    }
     //* Print Result on screen
     console.info(
       "✅ 🎉 Upgradeable Contract upgraded succesfully! Updated information:",
