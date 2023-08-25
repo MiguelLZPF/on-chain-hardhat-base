@@ -250,7 +250,7 @@ export const update = async (
       `❌ 🔎 Contract record ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${adminAddr}`
     );
   }
-  if (!((await versionDotToNum(actualRecord.version)) < versionNumber)) {
+  if (versionNumber && !((await versionDotToNum(actualRecord.version)) < versionNumber)) {
     throw new Error(
       `❌ New Version(${versionNumber}) must be higher than than actual version(${actualRecord.version})`
     );
@@ -484,6 +484,8 @@ export const deployWithUpgrDeployer = async (
     deployer,
     upgradeableDeployer
   );
+  const nameBytes = formatBytes32String(recordName);
+  const versionNumber = await versionDotToNum(version || "01.00");
   //* Actual deployment
   // encode contract deploy parameters | arguments
   const encodedArgs = new Interface(artifact.abi).encodeDeploy(args);
@@ -494,8 +496,8 @@ export const deployWithUpgrDeployer = async (
       artifact.bytecode,
       encodedArgs,
       new Uint8Array(32),
-      recordName,
-      version || "01.00",
+      nameBytes,
+      versionNumber,
       overrides || { ...GAS_OPT.max }
     )
   ).wait();
@@ -518,6 +520,84 @@ export const deployWithUpgrDeployer = async (
     ),
     logicInstance: await getContractInstance<Contract>(contractName, deployer, newRecord.logic!),
     contractInstance: await getContractInstance<Contract>(contractName, deployer, newRecord.proxy!),
+  };
+};
+
+export const upgradeWithUpgrDeployer = async (
+  contractName: ContractName,
+  recordName: string,
+  admin: Signer,
+  args: unknown[] = [],
+  overrides?: PayableOverrides,
+  version?: string,
+  contractRegistry?: string | (IContractRegistry & Ownable),
+  upgradeableDeployer?: string | (IUpgradeableDeployer & ProxyAdmin)
+): Promise<IUpgrDeployReturn> => {
+  // check if deployer is connected to the provider
+  admin = admin.provider ? admin : admin.connect(gProvider);
+  const adminAddr = admin.getAddress();
+  // get the artifact of the contract name
+  const artifact = getArtifact(contractName);
+  // get the SCR Contract instances
+  contractRegistry = await getContractInstance<IContractRegistry & Ownable>(
+    "ContractRegistry",
+    admin,
+    contractRegistry
+  );
+  upgradeableDeployer = await getContractInstance<IUpgradeableDeployer & ProxyAdmin>(
+    "UpgradeableDeployer",
+    admin,
+    upgradeableDeployer
+  );
+  const nameBytes = formatBytes32String(recordName);
+  const versionNumber = await versionDotToNum(version || "00.00");
+  //* Get previous Record
+  const oldRecord = await getRecord(recordName, await adminAddr, version, contractRegistry);
+  if (!oldRecord || !oldRecord.version) {
+    throw new Error(
+      `❌ 🔎 Contract record ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${adminAddr}`
+    );
+  }
+  if (versionNumber && !((await versionDotToNum(oldRecord.version)) < versionNumber)) {
+    throw new Error(
+      `❌ New Version(${versionNumber}) must be higher than than actual version(${oldRecord.version})`
+    );
+  }
+  //* Actual deployment
+  // encode contract deploy parameters | arguments
+  const encodedArgs = new Interface(artifact.abi).encodeDeploy(args);
+  // deploy
+  const receipt = await (
+    await upgradeableDeployer.deployContract(
+      contractRegistry.address || ADDR_ZERO,
+      artifact.bytecode,
+      encodedArgs,
+      new Uint8Array(32),
+      nameBytes,
+      versionNumber,
+      overrides || { ...GAS_OPT.max }
+    )
+  ).wait();
+  if (!receipt) {
+    throw new Error(`Error in contract deployment. Receipt undefined.`);
+  }
+  const newRecord = await getRecord(recordName, await adminAddr, version, contractRegistry);
+  if (!newRecord) {
+    throw new Error(
+      `❌ 🔎 Contract record ${recordName} not found in ContractRegistry ${contractRegistry.address} for admin ${adminAddr}`
+    );
+  }
+  return {
+    record: newRecord,
+    previousRecord: oldRecord,
+    proxyAdminInstance: upgradeableDeployer as ProxyAdmin,
+    tupInstance: await getContractInstance<TransparentUpgradeableProxy>(
+      "TUP",
+      admin,
+      newRecord.proxy!
+    ),
+    logicInstance: await getContractInstance<Contract>(contractName, admin, newRecord.logic!),
+    contractInstance: await getContractInstance<Contract>(contractName, admin, newRecord.proxy!),
   };
 };
 
