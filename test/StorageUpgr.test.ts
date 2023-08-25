@@ -65,21 +65,16 @@ describe("Storage", () => {
     } else {
       step("Should deploy contract", async () => {
         // deploy and "store" ProxyAdmin
-        const proxyAdminDeployResult = await deploy(
-          "ProxyAdmin",
-          admin,
-          undefined,
-          undefined,
-          GAS_OPT.max,
-          false
-        );
+        const proxyAdminDeployResult = await deploy("ProxyAdmin", admin, undefined, GAS_OPT.max, {
+          offChain: false,
+          onChain: false,
+        });
         proxyAdmin = proxyAdminDeployResult.contractInstance as ProxyAdmin;
         // deploy Storage
         const deployResult = await deployUpgradeable(
           CONTRACT_NAME,
           admin,
           [INIT_VALUE],
-          undefined,
           GAS_OPT.max,
           proxyAdmin,
           false

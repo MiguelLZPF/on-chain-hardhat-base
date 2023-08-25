@@ -160,7 +160,7 @@ export const deploy = async (
     }
   }
   return {
-    deployment: storageOpt.offChain ? deployment : undefined,
+    deployment: deployment,
     record: storageOpt.onChain ? newRecord : undefined,
     recordUpdated: updated,
     contractInstance: contract,
@@ -352,7 +352,7 @@ export const deployUpgradeable = async (
     }
   }
   return {
-    deployment: storageOpt.offChain ? deployment : undefined,
+    deployment: deployment,
     record: storageOpt.onChain ? newRecord : undefined,
     adminDeployment: adminDeployment,
     proxyAdminInstance: proxyAdmin,
@@ -571,7 +571,7 @@ export const upgrade = async (
     }
   }
   return {
-    deployment: storageOpt.offChain ? deployment : undefined,
+    deployment: deployment,
     record: storageOpt.onChain ? newRecord : undefined,
     proxyAdminInstance: proxyAdmin,
     tupInstance: await tuProxy,

@@ -1,4 +1,4 @@
-import { GAS_OPT, KEYSTORE, TEST } from "configuration";
+import { CONTRACTS, GAS_OPT, KEYSTORE, TEST } from "configuration";
 import * as HRE from "hardhat";
 import { step } from "mocha-steps";
 import { expect } from "chai";
@@ -11,6 +11,10 @@ import { INetwork } from "models/Configuration";
 import { deploy } from "scripts/deploy";
 import { IStorage } from "typechain-types/artifacts/contracts/interfaces";
 import { Ownable } from "typechain-types/artifacts/@openzeppelin/contracts/access";
+import { deployWithContractDeployer } from "scripts/standardContractRegistry";
+import { trustCodeAt } from "scripts/decentralizedCodeTrust";
+import { IContractDeployer } from "standard-contract-registry/typechain-types";
+import { ICodeTrust } from "decentralized-code-trust/typechain-types";
 
 // Specific Constants
 const CONTRACT_NAME = "Storage";
@@ -52,6 +56,50 @@ describe("Storage", () => {
     defaultUser = accounts[1];
   });
 
+  describe("Difference between OffChain and OnChain deployment", () => {
+    step("Should deploy same contract with and without ContractDeployer", async () => {
+      const codeTrust = await getContractInstance<ICodeTrust>("CodeTrust", admin);
+      const offDeployResult = await deploy(
+        "ContractRegistry",
+        admin,
+        [codeTrust.address],
+        GAS_OPT.max,
+        {
+          offChain: false,
+          onChain: false,
+        }
+      );
+      // On chain
+      const contractDeployer = await getContractInstance<IContractDeployer>(
+        "ContractDeployer",
+        admin
+      );
+      await trustCodeAt(contractDeployer.address, admin);
+      const onDeployResult = await deployWithContractDeployer(
+        "ContractRegistry",
+        "Random_Name_02",
+        admin,
+        [codeTrust.address],
+        GAS_OPT.max,
+        "01.00",
+        undefined,
+        contractDeployer
+      );
+      const offChainTx = provider.getTransactionReceipt(offDeployResult.deployment?.deployTxHash!);
+      // TODO: use tx hash from new SCR version
+      const onChainTx = provider.getTransactionReceipt(
+        (await provider.getBlockWithTransactions(provider.getBlockNumber())).transactions[0].hash
+      );
+      const absDiff = (await onChainTx).gasUsed.sub((await offChainTx).gasUsed);
+      const relativeDiff = absDiff.mul(100).div((await onChainTx).gasUsed);
+      console.log(
+        `Off Chain contract deployment: ${(await offChainTx).gasUsed}`,
+        `\nOn Chain contract deployment: ${(await onChainTx).gasUsed}`,
+        `\nDifference or Overhead: ${absDiff} (${relativeDiff} %) gas units more than off chain deployment`
+      );
+    });
+  });
+
   describe("Deployment and Initialization", () => {
     if (STORAGE_DEPLOYED_AT) {
       step("Should create contract instance", async () => {
@@ -62,14 +110,10 @@ describe("Storage", () => {
       });
     } else {
       step("Should deploy contract", async () => {
-        const deployResult = await deploy(
-          CONTRACT_NAME,
-          admin,
-          [INIT_VALUE],
-          undefined,
-          GAS_OPT.max,
-          false
-        );
+        const deployResult = await deploy(CONTRACT_NAME, admin, [INIT_VALUE], GAS_OPT.max, {
+          offChain: false,
+          onChain: false,
+        });
         storage = deployResult.contractInstance as IStorage & Ownable;
         expect(isAddress(storage.address)).to.be.true;
         expect(storage.address).not.to.equal(ADDR_ZERO);
