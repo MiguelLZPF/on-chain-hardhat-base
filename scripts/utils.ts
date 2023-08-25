@@ -1,10 +1,12 @@
 import { BLOCKCHAIN, CONTRACTS } from "configuration";
 import { ContractName, INetwork, NetworkName } from "models/Configuration";
 import { Artifact, HardhatRuntimeEnvironment } from "hardhat/types";
-import { Contract, constants, Signer, ContractFactory } from "ethers";
-import { BlockTag, JsonRpcProvider } from "@ethersproject/providers";
+import { Contract, constants, Signer } from "ethers";
+import { BlockTag, JsonRpcProvider, Provider } from "@ethersproject/providers";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import util from "util";
+import { getContractDeployment } from "./deploy";
+import { IRegularDeployment, IUpgradeDeployment } from "models/Deploy";
 
 // Global HRE, Ethers Provider and network parameters
 export let ghre: HardhatRuntimeEnvironment;
@@ -38,10 +40,10 @@ export const chainIdToNetwork = new Map<number | undefined, NetworkName>([
   [BLOCKCHAIN.networks.get("mainTest")!.chainId, "mainTest"],
 ]);
 
-export const getArtifact = (contractName?: ContractName, path?: string): Artifact => {
+export function getArtifact(contractName?: ContractName, path?: string): Artifact {
   path = path ? path : CONTRACTS.get(contractName!)!.artifact;
   return JSON.parse(readFileSync(path, "utf-8")) as Artifact;
-};
+}
 
 /**
  * Create a new instance of a deployed contract
@@ -52,15 +54,33 @@ export const getArtifact = (contractName?: ContractName, path?: string): Artifac
  */
 export const getContractInstance = async <T>(
   contractName: ContractName,
-  signer?: Signer,
-  contractAddr?: string
+  signerOrProvider: Signer | Provider | JsonRpcProvider = gProvider,
+  contractOrAddress?: string | Contract
 ): Promise<T> => {
+  // get contract information from deployments file (async)
+  const deployment = getContractDeployment(contractName);
+  // get artifact from config file
   const artifact = getArtifact(contractName);
-  const factory = new ContractFactory(artifact.abi, artifact.bytecode, signer);
-  const contract = factory.attach(
-    contractAddr || CONTRACTS.get(contractName)!.address.get(gNetwork.name)!
-  );
-  return signer ? (contract as T) : (contract.connect(gProvider) as T);
+  // get the contract's addres from 1. parameter, 2. config file or 3. deployments.json
+  const finalAddress =
+    typeof contractOrAddress == "string"
+      ? contractOrAddress
+      : contractOrAddress?.address ||
+        CONTRACTS.get(contractName)?.address.get(gNetwork.name) ||
+        ((await deployment) as IRegularDeployment)?.address ||
+        ((await deployment) as IUpgradeDeployment).logic;
+  // Check if valid address was found
+  if (!finalAddress) {
+    if (contractName == "ContractRegistry") {
+      console.warn("WARN: ContractRegistry not found, its needed to SCR Initialize first.");
+    }
+    throw new Error(
+      `Cannot find contract ${contractName} address in parameter | config file | deployments file`
+    );
+  }
+  // create and return contract instance
+  const contract = new Contract(finalAddress, artifact.abi, signerOrProvider);
+  return contract as T;
 };
 
 /**
@@ -115,4 +135,22 @@ export const logObject = (object: any) => {
  */
 export function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Checks if an object is empty.
+ * An object is considered empty if it has no enumerable properties.
+ *
+ * @param obj - The object to be checked for emptiness.
+ * @returns `true` if the object is empty, `false` otherwise.
+ *
+ * @example
+ * const emptyObject = {};
+ * const nonEmptyObject = { key: 'value' };
+ *
+ * console.log(isObjectEmpty(emptyObject)); // Output: true
+ * console.log(isObjectEmpty(nonEmptyObject)); // Output: false
+ */
+export function isObjectEmpty(obj: object): boolean {
+  return Object.keys(obj).length === 0;
 }

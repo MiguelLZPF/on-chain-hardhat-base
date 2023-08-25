@@ -5,10 +5,10 @@ import { subtask, task, types } from "hardhat/config";
 import { HardhatRuntimeEnvironment, HardhatUserConfig } from "hardhat/types";
 import { BigNumber, Wallet, Contract } from "ethers";
 import { Mnemonic } from "ethers/lib/utils";
-import { BLOCKCHAIN, GAS_OPT, KEYSTORE } from "configuration";
+import { BLOCKCHAIN, CONTRACTS, GAS_OPT, KEYSTORE } from "configuration";
 import { decryptWallet, generateWallet, generateWallets } from "scripts/wallets";
 import { changeLogic, deploy, deployUpgradeable, getLogic, upgrade } from "scripts/deploy";
-import { getContractInstance, setGlobalHRE } from "scripts/utils";
+import { gNetwork, getContractInstance, setGlobalHRE } from "scripts/utils";
 import {
   ICallContract,
   IChangeLogic,
@@ -16,11 +16,35 @@ import {
   IGenerateWallets,
   IGetLogic,
   IGetMnemonic,
+  IGetRecord,
+  IGetRecords,
   IGetWalletInfo,
+  IInitialize,
+  IRegister,
   ISignerInformation,
+  IUpdate,
   IUpgrade,
 } from "models/Tasks";
 import JSON5 from "json5";
+import {
+  deployWithContractDeployer,
+  deployWithUpgrDeployer,
+  getRecord,
+  getRecords,
+  initialize,
+  register,
+  update,
+  upgradeWithUpgrDeployer,
+} from "scripts/standardContractRegistry";
+import { network } from "hardhat";
+import {
+  IDeployReturn,
+  IRegularDeployment,
+  IUpgrDeployReturn,
+  IUpgradeDeployment,
+} from "models/Deploy";
+import { isTrustedCode, trustCodeAt } from "scripts/decentralizedCodeTrust";
+import yesno from "yesno";
 
 //* TASKS
 subtask("create-signer", "Creates new signer from given params")
@@ -256,22 +280,69 @@ task("get-mnemonic", "Recover mnemonic phrase from an encrypted wallet")
 // DEPLOYMENTS
 task("deploy", "Deploy smart contracts on '--network'")
   .addFlag("upgradeable", "Deploy as upgradeable")
-  .addPositionalParam("contractName", "Name of the contract to deploy", undefined, types.string)
+  .addPositionalParam(
+    "contractName",
+    "Name of the contract to upgrade (main use: get factory)",
+    undefined,
+    types.string
+  )
   .addOptionalParam(
     "proxyAdmin",
-    "Address of a deloyed Proxy Admin. Only if --upgradeable deployment",
+    "(Optional) [First found in deployments file] Address of a deloyed Proxy Admin. Only if --upgradeable deployment",
     undefined,
     types.string
   )
   .addOptionalParam(
     "contractArgs",
-    "Contract initialize function's arguments if any",
+    "(Optional) [undefined] Contract initialize function's arguments if any",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "storeOffChain",
+    "(Optional) [false] Boolean to store deploy data off chain in the 'deployments' file",
+    undefined,
+    types.boolean
+  )
+  .addOptionalParam(
+    "storeOnChain",
+    "(Optional) [true] Boolean to store deploy data on chain in the Contract Registry",
+    undefined,
+    types.boolean
+  )
+  .addOptionalParam(
+    "recordName",
+    "(Optional) [undefined] Name to assign to the Record stored on chain. If storeOnChain is true",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "recordVersion",
+    "(Optional) [1.0] Version to assign to the Record stored on chain. If storeOnChain is true",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "(Optional) [CONTRCTS.contractRegistry] Contract Registry to use. If undefined use default. Only if storeOnChain is true",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractDeployer",
+    "(Optional) [undefined] Contract Deployer to use for deploying the contract. Use 'default' keyword to use default one from config or deployments file.",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "upgradeableDeployer",
+    "(Optional) [undefined] Upgradeable Deployer to use for deploying the contract. Use 'default' keyword to use default one from config or deployments file.",
     undefined,
     types.string
   )
   .addOptionalParam(
     "tag",
-    "Optional string to include metadata or anything related with a deployment",
+    "(Optional) [undefined] string to include metadata or anything related with a deployment. If storeOffChain is true",
     undefined,
     types.string
   )
@@ -323,55 +394,209 @@ task("deploy", "Deploy smart contracts on '--network'")
     if (!args.noCompile) {
       await hre.run("compile");
     }
-    const wallet = await hre.run("create-signer", {
+    const wallet = (await hre.run("create-signer", {
       relativePath: args.relativePath,
       password: args.password,
       privateKey: args.privateKey,
       mnemonicPhrase: args.mnemonicPhrase,
       mnemonicPath: args.mnemonicPath,
       mnemonicLocale: args.mnemonicLocale,
-    } as ISignerInformation);
+    } as ISignerInformation)) as Wallet;
+    let result: IDeployReturn | IUpgrDeployReturn;
     if (args.upgradeable) {
-      await deployUpgradeable(
-        args.contractName,
-        wallet,
-        args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
-        args.tag,
-        { value: args.txValue, ...GAS_OPT.max },
-        args.proxyAdmin,
-        args.initialize || false,
-        true
-      );
+      if (args.upgradeableDeployer) {
+        const isTrusted = await isTrustedCode(args.upgradeableDeployer, wallet.address, wallet);
+        if (!isTrusted) {
+          const yes = await yesno({
+            question: `Contract UpgradeableDeployer at ${args.upgradeableDeployer} han not been trusted yet. Do you accept to trust it for two minutes?`,
+          });
+          if (!yes) {
+            throw new Error(
+              "❌ Cannot proceed with deployment if UpgradeableDeployer is not trusted. You can trust it by yourself and then come back."
+            );
+          }
+          try {
+            await trustCodeAt(args.upgradeableDeployer, wallet, 120);
+          } catch (error) {
+            throw new Error(
+              `❌ Trusting UpgradeableDeployer at ${args.upgradeableDeployer} from ${wallet.address}`
+            );
+          }
+        }
+        result = await deployWithUpgrDeployer(
+          args.contractName,
+          args.recordName || args.contractName,
+          wallet,
+          args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+          { value: args.txValue, ...GAS_OPT.max },
+          args.recordVersion,
+          args.contractRegistry,
+          args.upgradeableDeployer == "default" ? undefined : args.upgradeableDeployer
+        );
+      } else {
+        result = await deployUpgradeable(
+          args.contractName,
+          wallet,
+          args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+          { value: args.txValue, ...GAS_OPT.max },
+          args.proxyAdmin,
+          args.initialize || false,
+          {
+            offChain: args.storeOffChain || false,
+            onChain: args.storeOnChain || true,
+            scr: {
+              recordName: args.recordName,
+              version: args.recordVersion,
+              contractRegistry: args.contractRegistry,
+            },
+            tag: args.tag,
+          }
+        );
+      }
     } else {
-      await deploy(
-        args.contractName,
-        wallet,
-        args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
-        args.tag,
-        {
-          ...GAS_OPT.max,
-          value: args.txValue,
-        },
-        true
-      );
+      if (args.contractDeployer) {
+        const isTrusted = await isTrustedCode(args.contractDeployer, wallet.address, wallet);
+        if (!isTrusted) {
+          const yes = await yesno({
+            question: `Contract ContractDeployer at ${args.contractDeployer} han not been trusted yet. Do you accept to trust it for two minutes?`,
+          });
+          if (!yes) {
+            throw new Error(
+              "❌ Cannot proceed with deployment if ContractDeployer is not trusted. You can trust it by yourself and then come back."
+            );
+          }
+          try {
+            await trustCodeAt(args.contractDeployer, wallet, 120);
+          } catch (error) {
+            throw new Error(
+              `❌ Trusting ContractDeployer at ${args.contractDeployer} from ${wallet.address}`
+            );
+          }
+        }
+        result = await deployWithContractDeployer(
+          args.contractName,
+          args.recordName || args.contractName,
+          wallet,
+          args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+          { value: args.txValue, ...GAS_OPT.max },
+          args.recordVersion,
+          args.contractRegistry,
+          args.contractDeployer == "default" ? undefined : args.contractDeployer
+        );
+      } else {
+        result = await deploy(
+          args.contractName,
+          wallet,
+          args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+          {
+            ...GAS_OPT.max,
+            value: args.txValue,
+          },
+          {
+            offChain: args.storeOffChain || false,
+            onChain: args.storeOnChain || true,
+            scr: {
+              recordName: args.recordName,
+              version: args.recordVersion,
+              contractRegistry: args.contractRegistry,
+            },
+            tag: args.tag,
+          }
+        );
+      }
     }
+    //* Print Result on screen
+    console.info(
+      `${result.recordUpdated ? "🔄 📄 Record has been updated!" : undefined}`,
+      "\n✅ 🎉 Contract deployed successfully! Contract Information:",
+      `\n  - Contract Name (id within this project): ${args.contractName}`,
+      `\n  - Record Name (id within the Contract Registry): ${args.recordName}`,
+      `\n  - Logic Address (the only one if regular deployment): ${
+        (result.deployment as unknown as IUpgradeDeployment)?.logic || result.record?.logic
+      } ${result.previousRecord ? `(Previous: ${result.previousRecord.logic})` : ""}`,
+      `\n  - Proxy Address (only if upgradeable deployment): ${
+        (result.deployment as unknown as IUpgradeDeployment)?.proxy || result.record?.proxy
+      }`,
+      `\n  - Admin or Deployer: ${wallet.address}`,
+      `\n  - Deploy Timestamp: ${result.deployment?.deployTimestamp || result.record?.timestamp}`,
+      `\n  - Bytecode Hash: ${result.deployment?.byteCodeHash || result.record?.logicCodeHash}`,
+      `\n  - Version (only if ContractRegistry): ${result.record?.version} ${
+        result.previousRecord ? `(Previous: ${result.previousRecord?.version})` : ""
+      }`,
+      `\n  - Tag or extra data: ${args.tag || result.record?.extraData}`
+    );
   });
 
 task("upgrade", "Upgrade smart contracts on '--network'")
-  .addPositionalParam("contractName", "Name of the contract to deploy", undefined, types.string)
-  .addPositionalParam("proxy", "Address of the TUP proxy", undefined, types.string)
-  .addOptionalParam("proxyAdmin", "Address of a deloyed Proxy Admin", undefined, types.string)
+  .addPositionalParam(
+    "contractName",
+    "Name of the contract to upgrade (main use: get factory)",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "proxy",
+    "(Optional) [undefined] Address of the TUP proxy",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "proxyAdmin",
+    "(Optional) [CONTRACTS] Address of a deloyed Proxy Admin",
+    undefined,
+    types.string
+  )
   .addOptionalParam(
     "contractArgs",
-    "Contract initialize function's arguments if any",
+    "(Optional) [undefined] Contract initialize function's arguments if any",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "storeOffChain",
+    "(Optional) [false] Boolean to store deploy data off chain in the 'deployments' file",
+    undefined,
+    types.boolean
+  )
+  .addOptionalParam(
+    "storeOnChain",
+    "(Optional) [true] Boolean to store deploy data on chain in the Contract Registry",
+    undefined,
+    types.boolean
+  )
+  .addOptionalParam(
+    "recordName",
+    "(Optional) [undefined] Name to assign to the Record stored on chain. If storeOnChain is true",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "recordVersion",
+    "(Optional) [1.0] Version to assign to the Record stored on chain. If storeOnChain is true",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "(Optional) [CONTRCTS.contractRegistry] Contract Registry to use. If undefined use default. Only if storeOnChain is true",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "upgradeableDeployer",
+    "(Optional) [undefined] Upgradeable Deployer to use for deploying the contract. Use 'default' keyword to use default one from config or deployments file.",
     undefined,
     types.string
   )
   .addOptionalParam(
     "tag",
-    "Optional string to include metadata or anything related with a deployment",
+    "(Optional) [undefined] string to include metadata or anything related with a deployment. If storeOffChain is true",
     undefined,
     types.string
+  )
+  .addFlag(
+    "initialize",
+    "If upgradeable deployment, choose weather to call the initialize function or not to"
   )
   .addFlag("noCompile", "Do not compile contracts before upgrade")
   // Signer params
@@ -424,14 +649,57 @@ task("upgrade", "Upgrade smart contracts on '--network'")
       mnemonicPath: args.mnemonicPath,
       mnemonicLocale: args.mnemonicLocale,
     } as ISignerInformation);
-    await upgrade(
-      args.contractName,
-      wallet,
-      args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
-      args.proxy,
-      args.proxyAdmin,
-      args.initialize || false,
-      true
+    let result: IUpgrDeployReturn;
+    if (args.upgradeableDeployer) {
+      result = await upgradeWithUpgrDeployer(
+        args.contractName,
+        args.recordName || args.contractName,
+        wallet,
+        args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+        undefined,
+        args.recordVersion,
+        args.contractRegistry,
+        args.upgradeableDeployer
+      );
+    } else {
+      result = await upgrade(
+        args.contractName,
+        wallet,
+        args.contractArgs ? JSON5.parse(args.contractArgs as string) : [],
+        args.proxy,
+        undefined,
+        args.proxyAdmin,
+        args.initialize || false,
+        {
+          offChain: args.storeOffChain || false,
+          onChain: args.storeOnChain || true,
+          scr: {
+            recordName: args.recordName,
+            version: args.recordVersion,
+            contractRegistry: args.contractRegistry,
+          },
+          tag: args.tag,
+        }
+      );
+    }
+    //* Print Result on screen
+    console.info(
+      "✅ 🎉 Upgradeable Contract upgraded succesfully! Updated information:",
+      `\n  - Contract Name (id within this project): ${args.contractName}`,
+      `\n  - Record Name (id within the Contract Registry): ${args.recordName}`,
+      `\n  - Logic Address (the only one if regular deployment): ${
+        (result.deployment as unknown as IUpgradeDeployment)?.logic || result.record?.logic
+      } ${result.previousRecord ? `(Previous: ${result.previousRecord.logic})` : ""}`,
+      `\n  - Proxy Address (only if upgradeable deployment): ${
+        (result.deployment as unknown as IUpgradeDeployment)?.proxy || result.record?.proxy
+      }`,
+      `\n  - Admin or Deployer: ${wallet.address}`,
+      `\n  - Deploy Timestamp: ${result.deployment?.deployTimestamp || result.record?.timestamp}`,
+      `\n  - Bytecode Hash: ${result.deployment?.byteCodeHash || result.record?.logicCodeHash}`,
+      `\n  - Version (only if ContractRegistry): ${result.record?.version} ${
+        result.previousRecord ? `(Previous: ${result.previousRecord?.version})` : ""
+      }`,
+      `\n  - Tag or extra data: ${args.tag || result.record?.extraData}`
     );
   });
 
@@ -604,6 +872,485 @@ task("change-logic", "change the actual logic|implementation smart contract of a
         `);
   });
 
+//* SCR (Standard Contract Registry) Only tasks
+task(
+  "scr-initialize",
+  "Initialize the '--network' to be able to work with Standard Contract Registry"
+)
+  .addFlag("deployContractDeployer", "Deploy the optional ContractDeployer Smart Contract")
+  .addOptionalParam(
+    "existingCodeTrust",
+    "Optional address to use as the default CodeTrust Contract",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "existingContractRegistry",
+    "Optional address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "existingContractDeployer",
+    "Optional address to use as the default optional ContractDeployer Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IInitialize, hre) => {
+    await setGlobalHRE(hre);
+    const wallet = await hre.run("create-signer", {
+      relativePath: args.relativePath,
+      password: args.password,
+      privateKey: args.privateKey,
+      mnemonicPhrase: args.mnemonicPhrase,
+      mnemonicPath: args.mnemonicPath,
+      mnemonicLocale: args.mnemonicLocale,
+    } as ISignerInformation);
+
+    await initialize(
+      wallet,
+      args.deployContractDeployer,
+      args.existingCodeTrust || CONTRACTS.get("CodeTrust")?.address.get(gNetwork.name),
+      args.existingContractRegistry ||
+        CONTRACTS.get("ContractRegistry")?.address.get(gNetwork.name),
+      args.existingContractDeployer || CONTRACTS.get("ContractDeployer")?.address.get(gNetwork.name)
+    );
+  });
+
+task(
+  "scr-register",
+  "Register a Contract Deployment in Contract Registry with Standard Contract Registry model at '--network'"
+)
+  .addParam("recordVersion", "Initial version to be assigned to this contract record")
+  .addOptionalParam("contractName", "Name of the contract to use", undefined, types.string)
+  .addOptionalParam(
+    "recordName",
+    "Name to be use to register the contract record. It is used as key",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "proxy",
+    "Address of the proxy if is an upgradeable contract",
+    undefined,
+    types.string
+  )
+  .addOptionalParam("logic", "Address of the logic contract", undefined, types.string)
+  .addOptionalParam(
+    "logicCodeHash",
+    "Hash of the logic contract to identify deployed code",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "Optional address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IRegister, hre) => {
+    await setGlobalHRE(hre);
+    const wallet = await hre.run("create-signer", {
+      relativePath: args.relativePath,
+      password: args.password,
+      privateKey: args.privateKey,
+      mnemonicPhrase: args.mnemonicPhrase,
+      mnemonicPath: args.mnemonicPath,
+      mnemonicLocale: args.mnemonicLocale,
+    } as ISignerInformation);
+
+    const result = await register(
+      args.recordVersion,
+      wallet,
+      args.contractName,
+      args.recordName,
+      args.proxy,
+      args.logic,
+      args.logicCodeHash,
+      args.contractRegistry
+    );
+    console.info(
+      "✅ 🎉 Contract Record registered successfully! Contract Record:",
+      `\n  - Contract Name (id within this project): ${args.contractName}`,
+      `\n  - Record Name (id within the Contract Registry): ${args.recordName}`,
+      `\n  - Logic Address (the only one if regular deployment): ${result?.logic}`,
+      `\n  - Proxy Address (only if upgradeable deployment): ${result?.proxy}`,
+      `\n  - Admin or Deployer: ${wallet.address}`,
+      `\n  - Deploy Timestamp: ${result?.timestamp}`,
+      `\n  - Bytecode Hash: ${result?.logicCodeHash}`,
+      `\n  - Version (only if ContractRegistry): ${result?.version}`
+    );
+  });
+
+task(
+  "scr-update",
+  "Update a Contract Record in Contract Registry with Standard Contract Registry model at '--network'"
+)
+  .addParam("recordVersion", "New version to be assigned to this contract record")
+  .addOptionalParam("contractName", "Name of the contract to use", undefined, types.string)
+  .addOptionalParam(
+    "recordName",
+    "Name to be use to register the contract record. It is used as key",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "proxy",
+    "Address of the proxy if is an upgradeable contract",
+    undefined,
+    types.string
+  )
+  .addOptionalParam("logic", "Address of the logic contract", undefined, types.string)
+  .addOptionalParam(
+    "newAdmin",
+    "Address of the new admin if you want to change it",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "logicCodeHash",
+    "Hash of the logic contract to identify deployed code",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "Optional address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IUpdate, hre) => {
+    await setGlobalHRE(hre);
+    const wallet = await hre.run("create-signer", {
+      relativePath: args.relativePath,
+      password: args.password,
+      privateKey: args.privateKey,
+      mnemonicPhrase: args.mnemonicPhrase,
+      mnemonicPath: args.mnemonicPath,
+      mnemonicLocale: args.mnemonicLocale,
+    } as ISignerInformation);
+
+    const result = await update(
+      args.recordVersion,
+      wallet,
+      args.contractName,
+      args.recordName,
+      args.proxy,
+      args.logic,
+      args.newAdmin,
+      args.logicCodeHash,
+      args.contractRegistry
+    );
+    //* Print Result on screen
+    console.info(
+      "✅ 🎉 Contract record updated succesfully! Update information:",
+      `\n  - Contract Name (id within this project): ${args.contractName}`,
+      `\n  - Record Name (id within the Contract Registry): ${result.new.name}`,
+      `\n  - Logic Address (the only one if regular deployment): ${result.new.logic} (Previous: ${result.previous.logic})`,
+      `\n  - Proxy Address (only if upgradeable deployment): ${result.new.proxy}`,
+      `\n  - Admin: ${result.new.admin} (Previous: ${result.previous.admin})`,
+      `\n  - Deploy Timestamp: ${result.new.timestamp} (Previous: ${result.previous.timestamp})`,
+      `\n  - Bytecode Hash: ${result.new.logicCodeHash} (Previous: ${result.previous.logicCodeHash})`,
+      `\n  - Version: ${result.new.version} (Previous: ${result.previous.version})`,
+      `\n  - Extra data: ${result.new.extraData} (Previous: ${result.previous.extraData})`
+    );
+  });
+
+task(
+  "scr-get-record",
+  "Get detail of one Record in Contract Registry of a given admin address with Standard Contract Registry model at '--network'. If not admin address provided, system record will be returned."
+)
+  .addParam(
+    "recordName",
+    "Name to be use to retreive the contract record. It is used as key",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "admin",
+    "Address of th admin account who registered the contract.",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "recordVersion",
+    "Version to be retreived of this contract record",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "(Optional) [Configuration or deployments.json] address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IGetRecord, hre) => {
+    await setGlobalHRE(hre);
+    if (!args.admin && (args.relativePath || args.privateKey || args.mnemonicPhrase)) {
+      args.admin = (
+        (await hre.run("create-signer", {
+          relativePath: args.relativePath,
+          password: args.password,
+          privateKey: args.privateKey,
+          mnemonicPhrase: args.mnemonicPhrase,
+          mnemonicPath: args.mnemonicPath,
+          mnemonicLocale: args.mnemonicLocale,
+        } as ISignerInformation)) as Wallet
+      ).address;
+    }
+    if (!args.admin) {
+      throw new Error("❌ 🔑 Admin or signer information needed to recover Contract Record");
+    }
+    const result = await getRecord(
+      args.recordName,
+      args.admin,
+      args.recordVersion,
+      args.contractRegistry
+    );
+    if (result && result.name) {
+      console.info(
+        `✅ 📄 Contract Record successfully retrieved:`,
+        `\n  - Name: ${result.name}`,
+        `\n  - Proxy: ${result.proxy}`,
+        `\n  - Logic: ${result.logic}`,
+        `\n  - Version: ${result.version}`,
+        `\n  - Admin: ${result.admin}`,
+        `\n  - Logic code hash: ${result.logicCodeHash}`,
+        `\n  - Extra Data: ${result.extraData}`,
+        `\n  - Time Stamp: ${result.timestamp}`
+      );
+    } else {
+      throw new Error(
+        `❌ 🔎 Not Found. Record ${args.recordName} not found in ${args.contractRegistry} for ${args.admin}`
+      );
+    }
+  });
+
+task(
+  "scr-get-records",
+  "Get all records in Contract Registry of a given admin address with Standard Contract Registry model at '--network'. If not admin address provided, system record will be returned."
+)
+  .addOptionalParam(
+    "admin",
+    "Address of th admin account who registered the contracts. 'system', 'System' or '' (empty) can be used to get the system records.",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "contractRegistry",
+    "(Optional) [Configuration or deployments.json] address to use as the default ContractRegistry Contract",
+    undefined,
+    types.string
+  )
+  // Signer params
+  .addOptionalParam(
+    "relativePath",
+    "Path relative to KEYSTORE.root to store the wallets",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "password",
+    "Password to decrypt the wallet",
+    KEYSTORE.default.password,
+    types.string
+  )
+  .addOptionalParam(
+    "privateKey",
+    "A private key in hexadecimal can be used to sign",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPhrase",
+    "Mnemonic phrase to generate wallet from",
+    undefined,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicPath",
+    "Mnemonic path to generate wallet from",
+    KEYSTORE.default.mnemonic.path,
+    types.string
+  )
+  .addOptionalParam(
+    "mnemonicLocale",
+    "Mnemonic locale to generate wallet from",
+    KEYSTORE.default.mnemonic.locale,
+    types.string
+  )
+  .setAction(async (args: IGetRecords, hre) => {
+    await setGlobalHRE(hre);
+    // Create Signer object only if not admin and parameters given
+    if (!args.admin && (args.relativePath || args.privateKey || args.mnemonicPhrase)) {
+      args.admin = (
+        (await hre.run("create-signer", {
+          relativePath: args.relativePath,
+          password: args.password,
+          privateKey: args.privateKey,
+          mnemonicPhrase: args.mnemonicPhrase,
+          mnemonicPath: args.mnemonicPath,
+          mnemonicLocale: args.mnemonicLocale,
+        } as ISignerInformation)) as Wallet
+      ).address;
+    }
+    const result = await getRecords(args.admin, args.contractRegistry);
+    if (result && result.length > 0) {
+      console.info(`✅ 📄 Contract Records successfully retrieved:\n`, result);
+    } else {
+      throw new Error(
+        `❌ 🔎 Not Found. Records not found in ${args.contractRegistry} for ${args.admin}`
+      );
+    }
+  });
 // OTHER
 task("get-timestamp", "get the current timestamp in seconds")
   .addOptionalParam("timeToAdd", "time to add to the timestamp in seconds", 0, types.int)
