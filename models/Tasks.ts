@@ -53,8 +53,7 @@ export interface IDeploy extends ISignerInformation {
   upgradeableDeployer?: string;
 }
 
-export interface IUpgrade
-  extends Omit<IDeploy, "upgradeable" | "contractDeployer" | "upgradeableDeployer"> {
+export interface IUpgrade extends Omit<IDeploy, "upgradeable" | "contractDeployer"> {
   proxy?: string;
 }
 
